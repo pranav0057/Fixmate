@@ -7,7 +7,7 @@ import { MessageSquareCode, X, ChevronDown, Play } from "lucide-react";
 import AISidebar from "../components/AISidebar";
 import { useAuth } from "../context/AuthContext.jsx";
 import { initVimMode } from "monaco-vim";
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
+
 const getErrorCategory = (err) => {
   if (!err) return "Unknown";
   const text = err.toLowerCase();
@@ -23,7 +23,7 @@ const getErrorCategory = (err) => {
 // API helper
 const logRunToDatabase = async (runData) => {
   try {
-    await fetch(`${BACKEND_URL}/auth/log-run`, {
+    await fetch(`${import.meta.env.VITE_BACKEND_URL}/auth/log-run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
@@ -173,7 +173,7 @@ const CodeEditorPage2 = ({
 
   const geminiAiHandler = async (text) => {
     try {
-      const response = await fetch(`${BACKEND_URL}/auth/ask-buddy`, {
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/auth/ask-buddy`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: text }),

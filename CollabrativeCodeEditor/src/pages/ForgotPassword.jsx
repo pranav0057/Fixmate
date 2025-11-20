@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { Code2, Mail } from "lucide-react";
 import { toast } from "react-hot-toast";
-backend_url=import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
+
 const ForgotPassword = () => {
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -17,7 +17,7 @@ const ForgotPassword = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${backend_url}/auth/forgot-password`, {
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/auth/forgot-password`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

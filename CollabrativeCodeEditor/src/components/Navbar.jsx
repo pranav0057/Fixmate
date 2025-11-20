@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Code2, Menu, X, User, Code } from "lucide-react"; // Removed Code2Icon, it wasn't used
 import { toast } from 'react-hot-toast';
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
+
 
 const Navbar = () => {
   const { user, setUser } = useAuth(); // Get user and setter from context
@@ -46,7 +46,7 @@ const Navbar = () => {
     setIsLoggingOut(true);
     try {
       // Call backend to clear httpOnly cookie
-      await fetch(`${BACKEND_URL}/auth/logout`, {
+      await fetch(`${import.meta.env.VITE_BACKEND_URL}/auth/logout`, {
         method: "POST",
         credentials: "include",
       });

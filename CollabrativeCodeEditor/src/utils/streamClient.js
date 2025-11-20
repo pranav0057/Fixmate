@@ -1,6 +1,6 @@
 import { StreamVideoClient } from "@stream-io/video-react-sdk";
 
-const apiBase = "http://localhost:4000"; 
+const apiBase = import.meta.env.VITE_BACKEND_URL; 
 
 export const initStreamClient = async (userId, userName) => {
 

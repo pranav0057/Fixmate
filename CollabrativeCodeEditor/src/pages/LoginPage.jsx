@@ -1,5 +1,5 @@
 
-backend_url=import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
+
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import {
@@ -48,7 +48,7 @@ const LoginPage = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${backend_url}/auth/login`, {
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

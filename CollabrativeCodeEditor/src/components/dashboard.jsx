@@ -35,12 +35,12 @@ import {
 } from "recharts";
 import { Link } from "react-router-dom";
 import ReactECharts from 'echarts-for-react';
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
+
 
 async function getRunLogs() {
   try {
 
-    const response = await fetch(`${BACKEND_URL}/auth/get-run-logs`, {
+    const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/auth/get-run-logs`, {
       method: "GET",
       credentials: "include",
       headers: {

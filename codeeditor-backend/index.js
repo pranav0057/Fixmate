@@ -17,7 +17,7 @@ initSocket(server);
 app.use(cookieParser());
 app.use(
   cors({
-    origin: "https://fixmate-1-21m8.onrender.com/",
+    origin: "https://fixmate-1-21m8.onrender.com",
     credentials: true,
   })
 );

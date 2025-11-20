@@ -1,4 +1,3 @@
-backend_url=import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
 import React, { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Code2, Lock, Eye, EyeOff } from "lucide-react";
@@ -28,7 +27,7 @@ const ResetPassword = () => {
 
     try {
       const response = await fetch(
-        `${backend_url}/auth/reset-password/${token}`, // Send token in URL
+        `${import.meta.env.VITE_BACKEND_URL}/auth/reset-password/${token}`, // Send token in URL
         {
           method: "POST",
           headers: {
