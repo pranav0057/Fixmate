@@ -1,4 +1,4 @@
-
+backend_url=import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext.jsx"; // Imports your file
 import {
@@ -65,7 +65,7 @@ const RegisterPage = () => {
     const checkUsername = async () => {
       try {
         const res = await fetch(
-          `http://localhost:4000/auth/check-username?username=${debouncedUsername}`
+          `${backend_url}/auth/check-username?username=${debouncedUsername}`
         );
         const data = await res.json();
         setIsUsernameAvailable(data.available);

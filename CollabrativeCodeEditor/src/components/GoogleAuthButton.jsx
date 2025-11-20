@@ -5,7 +5,7 @@ import { signInWithPopup } from "firebase/auth";
 import { useAuth } from "../context/AuthContext.jsx"; // Make sure path is correct
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
 export default function GoogleAuthButton() {
   const { setUser } = useAuth();
   const navigate = useNavigate();
@@ -20,7 +20,7 @@ export default function GoogleAuthButton() {
         throw new Error("Failed to get ID token from Firebase");
       }
 
-      const response = await fetch(`http://localhost:4000/auth/google-login`, {
+      const response = await fetch(`${BACKEND_URL}/auth/google-login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

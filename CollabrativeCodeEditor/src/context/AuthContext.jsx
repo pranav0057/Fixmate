@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect } from "react";
-
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
@@ -15,7 +15,7 @@ export const AuthProvider = ({ children }) => {
     const checkAuthStatus = async () => {
       setLoading(true);
       try {
-        const response = await fetch("http://localhost:4000/auth/current-user", {
+        const response = await fetch(`${BACKEND_URL}/auth/current-user`, {
           method: "GET",
           credentials: "include",
         });
