@@ -30,6 +30,7 @@ export const generateRefreshToken = (payload) => {
 };
 
 export const verifyJWT = async (req, res, next) => {
+  console.log("token came for verification");
   const token =
     req.cookies.accessToken ||
     req.header("Authorization")?.replace("Bearer ", "");
