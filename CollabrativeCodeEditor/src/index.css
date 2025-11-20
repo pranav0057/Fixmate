@@ -1,0 +1,83 @@
+@import "tailwindcss";
+body {
+  background-color: #0f172a;
+  overscroll-behavior-x: none;       /* disables horizontal bounce */
+  overscroll-behavior-y: auto;       /* keeps vertical bounce */
+}
+textarea::-webkit-scrollbar {
+  width: 0px;
+  height: 0px;
+}
+
+textarea {
+  scrollbar-width: none; /* Firefox */
+}
+/* === Custom Horizontal Scrollbar for Page Tabs === */
+/* === Clean Blue Scrollbar for Page Tabs === */
+.page-tabs::-webkit-scrollbar {
+  height: 6px;
+}
+
+
+.page-tabs::-webkit-scrollbar-track {
+  background: #2d2f36; 
+  border-radius: 4px;
+}
+
+
+.page-tabs::-webkit-scrollbar-thumb {
+  background: #02122c;
+  border-radius: 4px;
+}
+
+
+.page-tabs::-webkit-scrollbar-thumb:hover {
+  background: #2f5bba; 
+}
+
+
+.page-tabs::-webkit-scrollbar {
+  height: 6px;
+  opacity: 0;
+  transition: opacity 0.25s ease-in-out;
+}
+
+
+.page-tabs:hover::-webkit-scrollbar {
+  opacity: 1;
+}
+@keyframes rotateClock {
+  0% { transform: rotate(0deg); opacity: 0.6; }
+  100% { transform: rotate(360deg); opacity: 1; }
+}
+
+/* Chat messages panel scrollbars */
+.messages {
+  overflow: auto; /* vertical & horizontal scroll */
+}
+
+/* Webkit (Chrome, Edge, Safari) */
+.messages::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.messages::-webkit-scrollbar-track {
+  background: #2d2f36;
+  border-radius: 4px;
+}
+
+.messages::-webkit-scrollbar-thumb {
+  background: #02122c;
+  border-radius: 4px;
+}
+
+.messages::-webkit-scrollbar-thumb:hover {
+  background: #2f5bba;
+}
+
+/* Firefox */
+.messages {
+  scrollbar-width: thin;
+  scrollbar-color: #02122c #2d2f36;
+}
