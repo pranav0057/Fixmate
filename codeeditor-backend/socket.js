@@ -4,7 +4,7 @@ import { v4 as uuidV4 } from "uuid";
 export const initSocket = (server) => {
   const io = new Server(server, {
     cors: {
-      origin: "https://fixmate-1-21m8.onrender.com",
+      origin: "https://fixmate-code.vercel.app/",
       methods: ["GET", "POST"],
       credentials: true,
     },
