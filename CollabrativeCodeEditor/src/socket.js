@@ -1,5 +1,6 @@
+backend_url=import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
 import { io } from "socket.io-client";
-export const socket =  io("http://localhost:4000", {
+export const socket =  io(backend_url, {
   withCredentials: true,
 });
 
