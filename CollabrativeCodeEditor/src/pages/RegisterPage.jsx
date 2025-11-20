@@ -153,7 +153,7 @@ const RegisterPage = () => {
 
     setIsLoading(true);
     try {
-      const response = await fetch("http://localhost:4000/auth/register", {
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // --- MODIFIED --- (Added email to body)
