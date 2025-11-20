@@ -17,7 +17,7 @@ initSocket(server);
 app.use(cookieParser());
 app.use(
   cors({
-    origin: "https://fixmate-code.vercel.app/",
+    origin: "https://fixmate-code.vercel.app",
     credentials: true,
   })
 );
