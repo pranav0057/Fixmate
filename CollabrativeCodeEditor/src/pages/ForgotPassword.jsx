@@ -26,7 +26,7 @@ const ForgotPassword = () => {
       });
 
       const data = await response.json();
-
+      console.log("Forgot password response:", data);
       if (response.ok) {
         toast.success(data.message, { duration: 5000 });
       } else {
