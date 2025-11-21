@@ -1,4 +1,4 @@
-// // src/utils/sendEmail.js
+
 // import nodemailer from "nodemailer";
 
 // export const sendEmail = async (options) => {
@@ -26,45 +26,31 @@
 
 import nodemailer from "nodemailer";
 
-export const sendEmail = async (req, res) => {
-  try {
-    const { email, subject, message } = req.body;
+export const sendEmail = async (options) => {
+  const { email, subject, message } = options;
 
-    const transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 465,
-      secure: true, // true for 465
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS, // App password, not your real Gmail password
-      },
-    });
-
-    const mailOptions = {
-      from: `FixMate Support <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject,
-      html: message,
-    };
-
-    await new Promise((resolve, reject) => {
-      transporter.sendMail(mailOptions, (err, info) => {
-        if (err) {
-          console.error(err);
-          reject(err);
-        } else {
-          resolve(info);
-        }
-      });
-    });
-
-    return res.status(200).json({ message: "Email sent successfully" });
-
-  } catch (error) {
-    console.error("Email Error:", error);
-    return res.status(500).json({
-      message: "Failed to send email",
-      error: error.message,
-    });
+  if (!email) {
+    throw new Error("Recipient email is required");
   }
+
+  const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true, // SSL
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS, // MUST be a Gmail App Password
+    },
+  });
+
+  const mailOptions = {
+    from: `FixMate Support <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: subject || "No subject provided",
+    html: message || "<p>No message content</p>",
+  };
+
+  const info = await transporter.sendMail(mailOptions);
+
+  return info;
 };
