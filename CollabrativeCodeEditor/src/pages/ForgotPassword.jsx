@@ -33,9 +33,12 @@ const ForgotPassword = () => {
         toast.error(data.message || "Failed to send reset link.");
       }
     } catch (error) {
-      console.error("Forgot password error:", error);
-      toast.error("Something went wrong. Please try again.");
-    } finally {
+  console.error("Forgot Password Error:", error);
+
+  res.status(error.status || 500).json({
+    message: error.message || "Internal server error",
+  });
+} finally {
       setIsLoading(false);
     }
   };
