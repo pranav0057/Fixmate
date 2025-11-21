@@ -340,7 +340,7 @@ export const forgotPassword = async (req, res) => {
 
     res.status(200).json({ message: "If that email is registered, a reset link has been sent." });
   } catch (error) {
-    res.status(500).json({ message: "Error sending reset email." });
+    res.status(500).json(error);
   }
 };
 
