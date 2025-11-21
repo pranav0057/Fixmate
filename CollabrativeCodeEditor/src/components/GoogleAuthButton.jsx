@@ -28,10 +28,7 @@ export default function GoogleAuthButton() {
         },
         credentials: "include",
       });
-
-      console.log("Backend response status:", response.status);
       const data = await response.json();
-      console.log("Backend response data:", data);
 
       if (response.ok) {
         toast.success('Logged in successfully with Google!');

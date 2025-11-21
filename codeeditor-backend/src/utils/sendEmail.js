@@ -8,10 +8,10 @@ export const sendEmail = async (options) => {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS,
     },
-  });
+  }); 
 
   const mailOptions = {
-    from: "FixMate Support <pushkarna.bhavish2005@gmail.com>",
+    from: `FixMate Support <${process.env.EMAIL_USER}>`,
     to: options.email,
     subject: options.subject,
     html: options.message,

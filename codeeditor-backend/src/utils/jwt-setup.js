@@ -5,7 +5,7 @@ import { User } from "../models/user.model.js";
 //Generate Access Token (valid for 15 mins)
 export const generateAccessToken = (payload) => {
   const { _id, username } = payload;
-  console.log(process.env.JWT_SECRET);
+
   return jwt.sign(
     {
       _id,
