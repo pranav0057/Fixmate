@@ -160,7 +160,7 @@ const HomePage = () => {
               </p>
 
               {/* --- 4. Moved Conditional Action Layout here --- */}
-              {loading && !user ? (
+              {!user ? (
                 // --- GRID LAYOUT (Logged Out) ---
                 <div className="max-w-2xl mx-auto md:mx-0 grid grid-cols-1 md:grid-cols-2 gap-4 mb-16">
                   <input
