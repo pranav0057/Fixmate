@@ -50,9 +50,13 @@ const HomePage = () => {
   const [roomId, setRoomId] = useState("");
   const navigate = useNavigate();
   const { user, loading } = useAuth();
-
-  if (loading) {
-  return <HomeSkeleton />;
+  
+if (loading) {
+  return (
+    <div>
+      <HomeSkeleton />
+    </div>
+  );
 }
 
   useEffect(() => {
