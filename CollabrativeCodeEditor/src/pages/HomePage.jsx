@@ -16,12 +16,44 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
 
+const HomeSkeleton = () => {
+  return (
+    <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center px-6">
+      <div className="w-full max-w-5xl grid md:grid-cols-2 gap-10 animate-pulse">
+        
+        {/* Left side skeleton */}
+        <div className="space-y-6">
+          <div className="h-10 w-56 bg-slate-700 rounded-lg"></div>
+          <div className="h-6 w-72 bg-slate-700 rounded"></div>
+          <div className="h-4 w-full bg-slate-700 rounded"></div>
+          <div className="h-4 w-5/6 bg-slate-700 rounded"></div>
+          
+          <div className="grid grid-cols-2 gap-4 mt-8">
+            <div className="h-14 bg-slate-700 rounded-xl"></div>
+            <div className="h-14 bg-slate-700 rounded-xl"></div>
+            <div className="h-14 bg-slate-700 rounded-xl"></div>
+            <div className="h-14 bg-slate-700 rounded-xl"></div>
+          </div>
+        </div>
+
+        {/* Right side GIF placeholder */}
+        <div className="hidden md:block">
+          <div className="w-full h-80 bg-slate-700 rounded-xl"></div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const HomePage = () => {
   const [name, setName] = useState("");
   const [roomId, setRoomId] = useState("");
   const navigate = useNavigate();
   const { user, loading } = useAuth();
+
+  if (loading) {
+  return <HomeSkeleton />;
+}
 
   useEffect(() => {
     // If user is logged in, pre-fill their name
