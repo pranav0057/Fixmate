@@ -53,7 +53,7 @@ export const sendEmail = async (options) => {
 
   try {
     const { data, error } = await resend.emails.send({
-      from: "FixMate Support <onboarding@yourdomain.com>", // change after domain verification
+      from: "FixMate <onboarding@resend.dev>",
       to: email,
       subject: subject,
       html: message,
