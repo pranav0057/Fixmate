@@ -44,31 +44,36 @@
 // });
   
 // };
-import { Resend } from "resend";
-
-const resend = new Resend(process.env.RESEND_API_KEY);
+import nodemailer from "nodemailer";
 
 export const sendEmail = async (options) => {
-  const { email, subject, message } = options;
+  // 1. Create the transporter (Connects to Brevo)
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    secure: false, // true for 465, false for other ports (587 uses STARTTLS)
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
 
+  // 2. Define the email options
+  const mailOptions = {
+    from: `FixMate Support <${process.env.SMTP_FROM}>`, // Shows as: FixMate Support <fixmate@gmail.com>
+    to: options.email,
+    subject: options.subject,
+    html: options.message, // HTML content
+  };
+
+  // 3. Send the email
   try {
-    const { data, error } = await resend.emails.send({
-      from: "FixMate <onboarding@resend.dev>",
-      to: email,
-      subject: subject,
-      html: message,
-    });
-
-    if (error) {
-      console.error("Resend error:", error);
-      throw new Error(error.message || "Email sending failed");
-    }
-
-    console.log("Email sent successfully:", data);
-    return data;
-  } catch (err) {
-    console.error("Failed to send email:", err);
-    throw err;
+    const info = await transporter.sendMail(mailOptions);
+    console.log("Email sent successfully. ID:", info.messageId);
+    return info;
+  } catch (error) {
+    console.error("Error sending email:", error);
+    // Throwing error so your controller knows it failed
+    throw new Error("Email could not be sent");
   }
 };
-
