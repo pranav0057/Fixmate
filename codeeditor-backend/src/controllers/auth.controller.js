@@ -326,15 +326,40 @@ export const forgotPassword = async (req, res) => {
     const resetURL = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
 
     const message = `
-      <h1>You requested a password reset</h1>
-      <p>Please click this link to set a new password:</p>
-      <a href="${resetURL}" target="_blank">Reset Password</a>
-      <p>This link will expire in 10 minutes.</p>
-    `;
+  <div style="font-family:Arial, sans-serif; max-width:500px; margin:0 auto; line-height:1.6;">
+    <h2 style="color:#222;">FixMate — Password Reset</h2>
+
+    <p>Hello,</p>
+
+    <p>We received a request to reset the password for your FixMate account. 
+    If you didn’t make this request, you can safely ignore this email.</p>
+
+    <p style="margin: 20px 0;">
+      <a href="${resetURL}" 
+         style="background:#1A73E8; color:#fff; padding:12px 18px; text-decoration:none; border-radius:6px; font-size:16px;">
+         Reset Password
+      </a>
+    </p>
+
+    <p>If the button does not work, copy and paste the URL below:</p>
+    <p style="font-size:14px; color:#555; word-break:break-all;">${resetURL}</p>
+
+    <p>This reset link will expire in 10 minutes.</p>
+
+    <br>
+    <p>Best regards,<br>FixMate Support Team</p>
+
+    <hr style="margin-top:30px; border:none; border-top:1px solid #ccc;" />
+    <p style="font-size:12px; color:#777;">
+      This is an automated email from FixMate. Replies to this address are not monitored.
+    </p>
+  </div>
+`;
+
 
     await sendEmail({
       email: user.email,
-      subject: "Your FixMate Password Reset Link",
+      subject: "Reset your FixMate password",
       message,
     });
 
@@ -350,7 +375,7 @@ export const resetPassword = async (req, res) => {
     const { password } = req.body;
 
     if (!password || password.length < 6) {
-       return res.status(400).json({ message: "Password must be at least 6 characters." });
+      return res.status(400).json({ message: "Password must be at least 6 characters." });
     }
 
     const hashedToken = crypto
