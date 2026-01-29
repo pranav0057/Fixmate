@@ -1,150 +1,382 @@
-
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import Editor from "@monaco-editor/react";
 import axios from "axios";
+import { motion, AnimatePresence } from "framer-motion";
+import { X, Play } from "lucide-react";
+import { initVimMode } from "monaco-vim";
 
-const CodeEditor = ({ page, onUpdate }) => {
-  const { language, code, stdin, output } = page;
+const CodeEditor = ({ page, socket, roomId, userId }) => {
+  const {
+    id: pageId,
+    language: initialLanguage,
+    stdin: initialStdin,
+    output: initialOutput,
+    code: initialCode,
+  } = page;
+
+  /* ---------------- STATE ---------------- */
+  const [language, setLanguage] = useState(initialLanguage || "javascript");
+  const [stdin, setStdin] = useState(initialStdin || "");
+  const [output, setOutput] = useState(initialOutput || "");
   const [loading, setLoading] = useState(false);
+  const [showOutputPanel, setShowOutputPanel] = useState(false);
 
-  
-  const runCode = async () => {
-    setLoading(true);
-    onUpdate({ output: "Running..." });
+  /* ---------------- REFS ---------------- */
+  const editorRef = useRef(null);
+  const monacoRef = useRef(null);
+  const statusBarRef = useRef(null);
+  const vimModeRef = useRef(null);
 
-    try {
-      const res = await axios.post("https://emkc.org/api/v2/piston/execute", {
-        language: language,
-        version: "*",
-        files: [{ name: "main", content: code }],
-        stdin: stdin,
+  /** 🔒 Prevent echo loops */
+  const isRemoteEditRef = useRef(false);
+
+  /* ---------------- VIM MODE STATE ---------------- */
+  const [isVimMode, setIsVimMode] = useState(false);
+
+  /* ---------------- SOCKET: RECEIVE OPS ---------------- */
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleRemoteOp = ({
+      roomId: rId,
+      pageId: pId,
+      userId: senderId,
+      range,
+      text,
+    }) => {
+      if (rId !== roomId) return;
+      if (pId !== pageId) return;
+      if (senderId === userId) return;
+
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) return;
+
+      isRemoteEditRef.current = true;
+
+      editor.executeEdits("remote", [
+        {
+          range: new monaco.Range(
+            range.startLineNumber,
+            range.startColumn,
+            range.endLineNumber,
+            range.endColumn
+          ),
+          text,
+        },
+      ]);
+
+      isRemoteEditRef.current = false;
+    };
+
+    const handleContentUpdate = ({ pageId: pId, userId: senderId, updates }) => {
+      if (pId !== pageId) return;
+      if (senderId === userId) return;
+
+      if (updates.language !== undefined) {
+        setLanguage(updates.language);
+      }
+      if (updates.stdin !== undefined) {
+        setStdin(updates.stdin);
+      }
+      if (updates.output !== undefined) {
+        setOutput(updates.output);
+        if (updates.output && updates.output !== "Running...") {
+          setShowOutputPanel(true);
+        }
+      }
+    };
+
+    socket.on("editor-op", handleRemoteOp);
+    socket.on("content-update", handleContentUpdate);
+    
+    return () => {
+      socket.off("editor-op", handleRemoteOp);
+      socket.off("content-update", handleContentUpdate);
+    };
+  }, [socket, roomId, pageId, userId]);
+
+  /* ---------------- MONACO SETUP ---------------- */
+  const handleEditorDidMount = (editor, monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+
+    // Set initial code from page data (or empty string)
+    editor.setValue(initialCode || "");
+
+    // Initialize Vim mode if enabled
+    if (isVimMode) {
+      vimModeRef.current = initVimMode(editor, statusBarRef.current);
+    }
+
+    // 🔥 Capture local edits as OPERATIONS
+    editor.onDidChangeModelContent((event) => {
+      if (isRemoteEditRef.current) return;
+
+      event.changes.forEach((change) => {
+        socket.emit("editor-op", {
+          roomId,
+          pageId,
+          userId,
+          range: change.range,
+          text: change.text,
+        });
       });
 
-      const result = res.data.run?.output || "No output";
-      onUpdate({ output: result });
-    } catch {
-      const errorMsg = "Error running code";
-      onUpdate({ output: errorMsg });
+      // Save code to page state
+      const currentCode = editor.getValue();
+      socket.emit("content-change", {
+        roomId,
+        pageId,
+        userId,
+        updates: { code: currentCode },
+      });
+    });
+  };
+
+  /* ---------------- VIM MODE TOGGLE ---------------- */
+  useEffect(() => {
+    if (!editorRef.current) return;
+    
+    if (isVimMode) {
+      if (vimModeRef.current) vimModeRef.current.dispose();
+      vimModeRef.current = initVimMode(editorRef.current, statusBarRef.current);
+    } else {
+      if (vimModeRef.current) {
+        vimModeRef.current.dispose();
+        vimModeRef.current = null;
+      }
+      if (statusBarRef.current) statusBarRef.current.innerHTML = "";
+    }
+  }, [isVimMode]);
+
+  useEffect(() => {
+    return () => {
+      if (vimModeRef.current) {
+        vimModeRef.current.dispose();
+        vimModeRef.current = null;
+      }
+    };
+  }, []);
+
+  /* ---------------- LANGUAGE CHANGE ---------------- */
+  const handleLangChange = (e) => {
+    const newLang = e.target.value;
+    setLanguage(newLang);
+
+    socket.emit("content-change", {
+      roomId,
+      pageId,
+      userId,
+      updates: { language: newLang },
+    });
+  };
+
+  /* ---------------- INPUT ---------------- */
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setStdin(val);
+
+    socket.emit("content-change", {
+      roomId,
+      pageId,
+      userId,
+      updates: { stdin: val },
+    });
+  };
+
+  /* ---------------- RUN CODE ---------------- */
+  const runCode = async () => {
+    setLoading(true);
+    setShowOutputPanel(true);
+    setOutput("Running...");
+
+    socket.emit("content-change", {
+      roomId,
+      pageId,
+      userId,
+      updates: { output: "Running..." },
+    });
+
+    let result = "";
+    let isError = false;
+
+    try {
+      const code = editorRef.current?.getValue() || "";
+
+      const res = await axios.post(
+        "https://emkc.org/api/v2/piston/execute",
+        {
+          language,
+          version: "*",
+          files: [{ name: "main", content: code }],
+          stdin,
+        }
+      );
+
+      const stdout = res.data.run?.stdout?.trim();
+      const stderr = res.data.run?.stderr?.trim();
+      const compileErr = res.data.compile?.stderr?.trim();
+      const errorOutput = stderr || compileErr;
+      isError = !!errorOutput;
+      result = isError ? `Compiler Error:\n${errorOutput}` : stdout || "No output";
+    } catch (err) {
+      isError = true;
+      result = "⚠ Internal Error running code.";
     } finally {
       setLoading(false);
+      setOutput(result);
+
+      socket.emit("content-change", {
+        roomId,
+        pageId,
+        userId,
+        updates: { output: result },
+      });
     }
   };
 
-  const handleChange = (val) => {
-    onUpdate({ code: val || "" });
-  };
-
-  const handleLangChange = (e) => {
-    onUpdate({ language: e.target.value });
-  };
-
-  const handleInputChange = (e) => {
-    onUpdate({ stdin: e.target.value });
-  };
-
-  const isError = output?.toLowerCase().includes("error") || output?.toLowerCase().includes("exception");
-
+  /* ---------------- UI ---------------- */
   return (
-    <div className="flex flex-col h-full bg-gray-900 text-white p-2 rounded-lg border border-gray-700">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between mb-2">
-        <select
-          value={language}
-          onChange={handleLangChange}
-          className="bg-gray-800 border border-gray-700 text-white px-2 py-1 rounded-md text-sm focus:ring-2 focus:ring-blue-500 w-28"
-        >
-          <option value="python">Python</option>
-          <option value="javascript">JavaScript</option>
-          <option value="cpp">C++</option>
-          <option value="c">C</option>
-          <option value="java">Java</option>
-        </select>
-
-        <button
-          onClick={runCode}
-          disabled={loading}
-          className="flex items-center justify-center bg-green-500 hover:bg-green-600 px-3 py-1 rounded-md text-sm text-white font-medium disabled:opacity-50 w-20 cursor-pointer transition-colors"
-        >
-          {loading ? (
-            "⏳"
-          ) : (
-            <span className="flex items-center space-x-1">
-              <svg
-                className="w-4 h-4"
-                viewBox="0 0 24 24"
-                fill="currentColor" 
-                xmlns="http://www.w3.org/2000/svg"
+    <div className="h-full bg-slate-900 text-white flex flex-col overflow-hidden">
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col gap-3 pt-2 min-h-0">
+        
+        {/* EDITOR PANEL (Takes remaining height) */}
+        <div className="flex-1 flex flex-col bg-slate-800 rounded-xl shadow-xl overflow-hidden border border-slate-700/50">
+          {/* Toolbar */}
+          <div className="flex items-center justify-between bg-slate-800/80 backdrop-blur px-3 py-2 border-b border-slate-700/50 shrink-0">
+            <select
+                value={language}
+                onChange={handleLangChange}
+                className="bg-slate-900 text-white text-xs border border-slate-700 rounded-lg px-2.5 py-1 outline-none focus:border-cyan-500 transition"
               >
-                <path d="M5 3v18l15-9L5 3z" />
-              </svg>
-              <span>Run</span>
-            </span>
-          )}
-        </button>
-      </div>
+                <option value="python">Python</option>
+                <option value="javascript">JavaScript</option>
+                <option value="cpp">C++</option>
+                <option value="c">C</option>
+                <option value="java">Java</option>
+                <option value="go">Go</option>
+              </select>
 
-      {/* Editor */}
-      <div className="flex-1 border border-gray-700 rounded-lg overflow-hidden">
-        <Editor
-          theme="vs-dark"
-          height="100%" 
-          language={language}
-          value={code}
-          onChange={handleChange}
-          options={{
-            minimap: { enabled: false },
-            fontSize: 15,
-            automaticLayout: true,
-          }}
-        />
-      </div>
-
-      {/* Input */}
-      <div className="mt-3 bg-gray-800 border border-gray-700 p-3 rounded-md">
-        <h3 className="font-semibold text-blue-400 mb-2">Input</h3>
-        <textarea
-          value={stdin}
-          onChange={handleInputChange}
-          placeholder="Enter input values here..."
-          className="w-full h-20 p-2 rounded-md bg-gray-900 text-white border border-gray-700 focus:ring-2 focus:ring-blue-500 resize-none"
-        />
-      </div>
-
-      {/* Output */}
-      {output && output.trim() !== "" && (
-        <div
-          className={`mt-3 p-3 rounded-md border ${output.toLowerCase().includes("error") ||
-              output.toLowerCase().includes("exception")
-              ? "bg-red-900 border-red-700"
-              : "bg-gray-800 border-gray-700"
-            }`}
-        >
-          <div className="flex justify-between items-center mb-2">
-            <h3
-              className={`font-semibold ${output.toLowerCase().includes("error") ||
-                  output.toLowerCase().includes("exception")
-                  ? "text-red-300"
-                  : "text-blue-400"
+            <div className="flex items-center gap-2">
+              {/* Vim Mode Checkbox */}
+              <label className="flex items-center gap-1.5 cursor-pointer bg-slate-900/50 px-2.5 py-1 rounded-full border border-slate-700/50 hover:border-slate-600 transition">
+                <input
+                  type="checkbox"
+                  checked={isVimMode}
+                  onChange={(e) => setIsVimMode(e.target.checked)}
+                  className="w-3 h-3 rounded border-slate-600 text-cyan-500 focus:ring-0 bg-slate-800"
+                />
+                <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Vim Mode</span>
+              </label>
+              
+              {/* Run Button */}
+              <button
+                onClick={runCode}
+                disabled={loading}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wide shadow-lg transition-all active:scale-95 ${
+                  loading ? "bg-emerald-900/50 text-emerald-200" : "bg-emerald-600 hover:bg-emerald-500 text-white"
                 }`}
-            >
-              Output:
-            </h3>
-
-            {/*  Remove Button */}
-            <button
-              onClick={() => onUpdate({ output: "" })}
-              className="text-red-400 hover:text-red-300 text-lg font-bold"
-              title="Remove output"
-            >
-              ✕
-            </button>
+              >
+                {loading ? "Running..." : <><Play size={10} fill="currentColor"/> Run</>}
+              </button>
+            </div>
           </div>
 
-          <pre className="text-sm whitespace-pre-wrap max-h-32 overflow-y-auto">
-            {output}
-          </pre>
+          {/* Monaco Editor */}
+          <div className="relative flex-1 bg-[#1e1e1e] min-h-0">
+            <Editor
+              height="100%"
+              theme="vs-dark"
+              language={language}
+              onMount={handleEditorDidMount}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 16,
+                fontFamily: "'JetBrains Mono', monospace",
+                padding: { top: 15 },
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+              }}
+            />
+          </div>
+
+          {/* Vim Status Bar (Visible only when Vim Mode is ON) */}
+          <div 
+            ref={statusBarRef} 
+            className={`bg-slate-800 text-white text-xs font-bold font-mono px-3 py-1 border-t border-slate-700/50 ${isVimMode ? 'block' : 'hidden'}`}
+            style={{ minHeight: '24px' }} 
+          />
         </div>
-      )}
+
+        {/* BOTTOM PANEL (Fixed Height: 140px) */}
+        <div className="h-36 flex gap-3 shrink-0 overflow-hidden">
+          
+          {/* INPUT PANEL (Always Visible) */}
+          <motion.div 
+            layout
+            className="flex flex-col bg-slate-800 rounded-xl border border-slate-700/50 overflow-hidden shadow-lg h-full"
+            animate={{ width: showOutputPanel ? "50%" : "100%" }}
+            transition={{ type: "spring", bounce: 0, duration: 0.4 }}
+          >
+            <div className="bg-slate-800/80 px-3 py-1.5 border-b border-slate-700/50">
+              <span className="text-[12px] font-bold uppercase text-slate-400 tracking-widest">Input (Stdin)</span>
+            </div>
+            <textarea
+              value={stdin}
+              onChange={handleInputChange}
+              className="flex-1 w-full p-2.5 bg-transparent text-slate-300 text-xs font-mono resize-none outline-none focus:bg-slate-800/50 transition custom-scrollbar"
+              placeholder="Enter input for your code here..."
+              style={{
+                scrollbarWidth: 'thin',
+                scrollbarColor: '#475569 #1e293b'
+              }}
+            />
+          </motion.div>
+
+          {/* OUTPUT PANEL (Conditionally Visible) */}
+          <AnimatePresence>
+            {showOutputPanel && (
+              <motion.div 
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: "50%", opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ type: "spring", bounce: 0, duration: 0.4 }}
+                className="flex flex-col bg-slate-800 rounded-xl border border-slate-700/50 overflow-hidden shadow-lg h-full relative"
+              >
+                <div className="bg-slate-800/80 px-3 py-1.5 border-b border-slate-700/50 flex justify-between items-center shrink-0">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">Output</span>
+                  <button 
+                    onClick={() => setShowOutputPanel(false)} 
+                    className="text-slate-500 hover:text-white p-1 rounded hover:bg-slate-700"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                
+                <div 
+                  className="flex-1 p-2.5 overflow-auto font-mono text-xs bg-slate-900/30"
+                  style={{
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: '#475569 #1e293b'
+                  }}
+                >
+                  {output ? (
+                    <pre className={`${output.startsWith("Compiler Error") || output.startsWith("⚠") ? "text-rose-400" : "text-emerald-400"}`}>
+                      {output}
+                    </pre>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-slate-600 italic text-xs">
+                      Waiting for output...
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
     </div>
   );
 };

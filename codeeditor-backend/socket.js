@@ -1,4 +1,3 @@
-
 import { Server } from "socket.io";
 import { v4 as uuidV4 } from "uuid";
 
@@ -17,11 +16,12 @@ export const initSocket = (server) => {
   const roomPages = new Map();
   const DISCONNECT_GRACE_MS = 7000;
 
+  /* ---------------- PAGE FACTORY (no sample code) ---------------- */
   const createNewPage = (name = "Page 1") => ({
     id: uuidV4(),
     name,
     language: "javascript",
-    code: '// Welcome to your new page!\nconsole.log("Hello!");',
+    code: "",
     stdin: "",
     output: "",
   });
@@ -38,11 +38,11 @@ export const initSocket = (server) => {
   };
 
   io.on("connection", (socket) => {
+    /* ---------------- JOIN ROOM ---------------- */
     socket.on("join-room", ({ roomId, userName, userId }) => {
       socket.join(roomId);
       if (!userId) return;
 
-      const existingUser = userMap.get(userId);
       userMap.set(userId, {
         socketId: socket.id,
         name: userName,
@@ -72,6 +72,7 @@ export const initSocket = (server) => {
       socket.to(roomId).emit("user-joined", { userName, userId });
     });
 
+    /* ---------------- LEAVE ROOM ---------------- */
     socket.on("leave-room", ({ roomId, userId }, callback) => {
       userMap.delete(userId);
 
@@ -87,6 +88,7 @@ export const initSocket = (server) => {
       if (callback) callback({ status: "ok" });
     });
 
+    /* ---------------- CHAT ---------------- */
     socket.on("send-message", (msg, callback) => {
       const { roomId, userName, message, time, userId } = msg;
       socket.to(roomId).emit("receive-message", {
@@ -99,22 +101,38 @@ export const initSocket = (server) => {
       if (callback) callback({ status: "delivered" });
     });
 
-    socket.on("content-change", ({ roomId, pageId, updates }) => {
+    /* ---------------- METADATA SYNC ---------------- */
+    socket.on("content-change", ({ roomId, pageId, userId, updates }) => {
       const pages = roomPages.get(roomId);
       if (!pages) return;
 
       const page = pages.find((p) => p.id === pageId);
       if (page) Object.assign(page, updates);
 
-      socket.broadcast.to(roomId).emit("content-update", { pageId, updates });
+      socket.broadcast.to(roomId).emit("content-update", {
+        pageId,
+        userId,
+        updates,
+      });
     });
 
+    /* ---------------- 🔥 EDITOR OT RELAY ---------------- */
+    socket.on("editor-op", ({ roomId, pageId, userId, range, text }) => {
+      socket.broadcast.to(roomId).emit("editor-op", {
+        roomId,
+        pageId,
+        userId,
+        range,
+        text,
+      });
+    });
+
+    /* ---------------- PAGE MGMT ---------------- */
     socket.on("add-page", ({ roomId, name }) => {
       const pages = roomPages.get(roomId);
       if (!pages) return;
 
-      const newPage = createNewPage(name);
-      pages.push(newPage);
+      pages.push(createNewPage(name));
       io.to(roomId).emit("pages-update", pages);
     });
 
@@ -127,9 +145,9 @@ export const initSocket = (server) => {
       io.to(roomId).emit("pages-update", newPages);
     });
 
+    /* ---------------- END ROOM ---------------- */
     socket.on("end-room", ({ roomId, userId }, callback) => {
-      const ownerId = roomOwners.get(roomId);
-      if (userId !== ownerId) return;
+      if (roomOwners.get(roomId) !== userId) return;
 
       io.to(roomId).emit("room-ended", {
         message: "The room has been ended by the owner.",
@@ -138,10 +156,8 @@ export const initSocket = (server) => {
       if (callback) callback({ status: "ok" });
 
       setTimeout(() => {
-        const userIds = roomParticipants.get(roomId);
-        if (userIds) {
-          userIds.forEach((uid) => userMap.delete(uid));
-        }
+        const users = roomParticipants.get(roomId);
+        if (users) users.forEach((uid) => userMap.delete(uid));
 
         roomParticipants.delete(roomId);
         roomOwners.delete(roomId);
@@ -149,47 +165,42 @@ export const initSocket = (server) => {
       }, 2000);
     });
 
+    /* ---------------- KICK USER ---------------- */
     socket.on("remove-participant", ({ roomId, userId, userIdToKick }) => {
-      const ownerId = roomOwners.get(roomId);
-      if (userId !== ownerId) return;
+      if (roomOwners.get(roomId) !== userId) return;
 
       const kickedUser = userMap.get(userIdToKick);
       if (!kickedUser || kickedUser.roomId !== roomId) return;
 
-      const kickedSocketId = kickedUser.socketId;
-
-      io.to(kickedSocketId).emit("kicked", {
+      io.to(kickedUser.socketId).emit("kicked", {
         message: "You were removed from the room.",
       });
 
       userMap.delete(userIdToKick);
-      const set = roomParticipants.get(roomId);
-      if (set) set.delete(userIdToKick);
+      roomParticipants.get(roomId)?.delete(userIdToKick);
 
       io.to(roomId).emit("participants-update", getRoomUsers(roomId));
 
-      const kickedSock = io.sockets.sockets.get(kickedSocketId);
-      kickedSock?.leave(roomId);
-      kickedSock?.disconnect(true);
+      const sock = io.sockets.sockets.get(kickedUser.socketId);
+      sock?.leave(roomId);
+      sock?.disconnect(true);
     });
 
+    /* ---------------- DISCONNECT ---------------- */
     socket.on("disconnect", () => {
-      const userEntry = [...userMap.entries()].find(
+      const entry = [...userMap.entries()].find(
         ([, v]) => v.socketId === socket.id
       );
-      if (!userEntry) return;
+      if (!entry) return;
 
-      const [userId, userData] = userEntry;
-      const { roomId } = userData;
-      const disconnectedSocketId = socket.id;
+      const [userId, { roomId }] = entry;
+      const socketId = socket.id;
 
       setTimeout(() => {
-        const currentUser = userMap.get(userId);
-        if (currentUser && currentUser.socketId !== disconnectedSocketId) return;
-        if (!currentUser) return;
+        const u = userMap.get(userId);
+        if (!u || u.socketId !== socketId) return;
 
         userMap.delete(userId);
-
         const set = roomParticipants.get(roomId);
         if (set) {
           set.delete(userId);

@@ -1,4 +1,3 @@
-
 import React, {
   useState,
   useEffect,
@@ -49,29 +48,33 @@ const RoomPage = () => {
     onConfirm: null,
   });
 
-  //  NEW: State to track which page is being edited
+  //  State to track which page is being edited
   const [editingPageId, setEditingPageId] = useState(null);
 
   const confirmAction = (title, message, onConfirm) => {
     setConfirmation({ open: true, title, message, onConfirm });
   };
   
-
   const [ownerId, setOwnerId] = useState(
     () => sessionStorage.getItem("ownerId") || null
   );
 
-  const [pages, setPages] = useState([]);
+  // Load pages from session storage on mount
+  const [pages, setPages] = useState(() => {
+    const saved = sessionStorage.getItem(`pages_${roomId}`);
+    return saved ? JSON.parse(saved) : [];
+  });
+
   const [activePageId, setActivePageId] = useState(
-    () => sessionStorage.getItem("activePageId") || null
+    () => sessionStorage.getItem(`activePageId_${roomId}`) || null
   );
+  
   const activePage = pages.find((p) => p.id === activePageId);
 
   // State and Ref for Chat Panel Toggle
   const [isChatOpen, setIsChatOpen] = useState(true);
   const chatPanelRef = useRef(null);
-  // new now
-const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const onBackButtonEvent = useCallback((e) => {
     e.preventDefault();
@@ -101,14 +104,21 @@ const [unreadCount, setUnreadCount] = useState(0);
     navigate("/");
   };
 
+  // Save pages to session storage whenever they change
+  useEffect(() => {
+    if (pages.length > 0) {
+      sessionStorage.setItem(`pages_${roomId}`, JSON.stringify(pages));
+    }
+  }, [pages, roomId]);
+
+  // Save active page ID to session storage
   useEffect(() => {
     if (activePageId) {
-      sessionStorage.setItem("activePageId", activePageId);
+      sessionStorage.setItem(`activePageId_${roomId}`, activePageId);
     } else {
-      sessionStorage.removeItem("activePageId");
+      sessionStorage.removeItem(`activePageId_${roomId}`);
     }
-  }, [activePageId]);
-
+  }, [activePageId, roomId]);
 
   useEffect(() => {
     window.history.pushState(null, "", window.location.href);
@@ -118,7 +128,6 @@ const [unreadCount, setUnreadCount] = useState(0);
       window.removeEventListener("popstate", onBackButtonEvent);
     };
   }, [onBackButtonEvent]);
-
 
   useEffect(() => {
     if (!socket || !roomId || !userId) return;
@@ -134,9 +143,13 @@ const [unreadCount, setUnreadCount] = useState(0);
       }
     };
 
-    const handleContentUpdate = ({ pageId, updates }) => {
+    const handleContentUpdate = ({ pageId, userId: senderId, updates }) => {
+      if (senderId === userId) return; // Don't update from own changes
+      
       setPages((prevPages) =>
-        prevPages.map((p) => (p.id === pageId ? { ...p, ...updates } : p))
+        prevPages.map((p) =>
+          p.id === pageId ? { ...p, ...updates } : p
+        )
       );
     };
 
@@ -153,11 +166,11 @@ const [unreadCount, setUnreadCount] = useState(0);
       cleanExit(data.message || "The room has ended.");
     };
 
-    const handleOwner= ({ isOwner }) => {
+    const handleOwner = ({ isOwner }) => {
       console.log(isOwner);
       sessionStorage.setItem("ownerId", userId); 
       setOwnerId(userId);
-    }
+    };
 
     // --- Socket Setup ---
     socket.on("participants-update", handleParticipants);
@@ -165,7 +178,7 @@ const [unreadCount, setUnreadCount] = useState(0);
     socket.on("content-update", handleContentUpdate);
     socket.on("kicked", handleKicked);
     socket.on("room-ended", handleRoomEnded);
-    socket.on("room-owner-assigned",handleOwner);
+    socket.on("room-owner-assigned", handleOwner);
     socket.on("get-room-owner", ({ ownerId }) => {
       sessionStorage.setItem("ownerId", ownerId);
       setOwnerId(ownerId);
@@ -181,10 +194,11 @@ const [unreadCount, setUnreadCount] = useState(0);
       socket.off("content-update", handleContentUpdate);
       socket.off("kicked", handleKicked);
       socket.off("room-ended", handleRoomEnded);
+      socket.off("room-owner-assigned", handleOwner);
+      socket.off("get-room-owner");
     };
   }, [roomId, userName, userId, activePageId, navigate, call, client]);
 
- 
   const handleStartCall = async () => {
     if (isJoiningCall || sessionStorage.getItem("activeCallId")) {
       return;
@@ -201,7 +215,7 @@ const [unreadCount, setUnreadCount] = useState(0);
       console.log("Joined Stream call:", roomId);
       toast.success("Joined Stream call!");
     } catch (err) {
-      console.error(" Stream init error:", err);
+      console.error("Stream init error:", err);
       toast.error("Failed to start call.");
     } finally {
       setIsJoiningCall(false);
@@ -219,7 +233,7 @@ const [unreadCount, setUnreadCount] = useState(0);
         const existingCall = videoClient.call("default", savedCallId);
         await existingCall.join();
         existingCall.on("call.left", () => {
-          console.log(" User left call");
+          console.log("User left call");
           sessionStorage.removeItem("activeCallId");
           setCall(null);
           setClient(null);
@@ -236,25 +250,24 @@ const [unreadCount, setUnreadCount] = useState(0);
     restoreCall();
   }, [userId, userName]);
 
-  // new now
+  // Handle unread message notifications
   useEffect(() => {
-  if (!socket) return;
+    if (!socket) return;
 
-  const handleNewMessage = () => {
-    // If chat is CLOSED, increment counter
-    if (!isChatOpen) {
-      setUnreadCount((prev) => prev + 1);
-      toast("New message received", { icon: "💬" }); // Optional: small toast
-    }
-  };
+    const handleNewMessage = () => {
+      // If chat is CLOSED, increment counter
+      if (!isChatOpen) {
+        setUnreadCount((prev) => prev + 1);
+        toast("New message received", { icon: "💬" });
+      }
+    };
 
-  socket.on("receive-message", handleNewMessage);
+    socket.on("receive-message", handleNewMessage);
 
-  return () => {
-    socket.off("receive-message", handleNewMessage);
-  };
-}, [socket, isChatOpen]);
-// new now end
+    return () => {
+      socket.off("receive-message", handleNewMessage);
+    };
+  }, [socket, isChatOpen]);
 
   const handleLeaveCall = () => {
     console.log("Cleaning up after call end");
@@ -277,28 +290,9 @@ const [unreadCount, setUnreadCount] = useState(0);
     [roomId]
   );
 
-  const updatePageContent = useCallback(
-    (updates) => {
-      if (!activePageId) return;
-      setPages((prevPages) =>
-        prevPages.map((p) =>
-          p.id === activePageId ? { ...p, ...updates } : p
-        )
-      );
-      socket.emit("content-change", {
-        roomId,
-        pageId: activePageId,
-        updates,
-      });
-    },
-    [roomId, activePageId]
-  );
-
-
   const startEditingPageName = (pageId) => {
     setEditingPageId(pageId);
   };
-
 
   const handlePageNameChange = (pageId, newName) => {
     const trimmedName = newName.trim();
@@ -314,6 +308,7 @@ const [unreadCount, setUnreadCount] = useState(0);
       socket.emit("content-change", {
         roomId,
         pageId: pageId,
+        userId,
         updates: { name: trimmedName },
       });
       toast.success(`Page renamed to "${trimmedName}"`);
@@ -469,11 +464,11 @@ const [unreadCount, setUnreadCount] = useState(0);
               {pages.map((page) => (
                 <div
                   key={page.id}
-                  className={`flex items-center px-3 py-1 rounded-t-md mr-2 ${page.id === activePageId
+                  className={`flex items-center px-3 py-1 rounded-t-md mr-2 ${
+                    page.id === activePageId
                       ? "bg-gray-900 text-white border-t-2 border-blue-500"
                       : "text-gray-400 hover:text-white hover:bg-gray-700"
-                    } ${editingPageId !== page.id ? "cursor-pointer" : "cursor-text"}`}
-                  
+                  } ${editingPageId !== page.id ? "cursor-pointer" : "cursor-text"}`}
                   onClick={() => setActivePageId(page.id)}
                   onDoubleClick={() => startEditingPageName(page.id)}
                 >
@@ -522,7 +517,9 @@ const [unreadCount, setUnreadCount] = useState(0);
                 <CodeEditor
                   key={activePage.id}
                   page={activePage}
-                  onUpdate={updatePageContent}
+                  socket={socket}
+                  roomId={roomId}
+                  userId={userId}
                 />
               ) : (
                 <div className="flex items-center justify-center h-full text-gray-500">
@@ -582,7 +579,6 @@ const [unreadCount, setUnreadCount] = useState(0);
 
       <button
         onClick={toggleChatPanel}
-       
         className="absolute bottom-6 right-6 p-3 bg-gradient-to-r from-teal-500 via-cyan-200 to-emerald-200 hover:bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 text-white rounded-full shadow-lg transition-transform transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 z-50"
         title={isChatOpen ? "Hide Chat" : "Show Chat"}
       >
@@ -594,6 +590,7 @@ const [unreadCount, setUnreadCount] = useState(0);
           </span>
         )}
       </button>
+      
       <ConfirmationDialog
         open={confirmation.open}
         title={confirmation.title}
