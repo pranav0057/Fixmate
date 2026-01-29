@@ -27,8 +27,17 @@ connectDB()
     app.use("/auth", authRoutes);
     app.use("/stream", streamRoutes);
     app.get("/", (req, res) => res.send("Server is running"));
+    app.get('/keep-alive', (req, res) => {
+      res.send('Server is alive');
+    });
+
+    setInterval(() => {
+      fetch('https://fixmate-b5hi.onrender.com/keep-alive')
+        .then(() => console.log('Pinged self'))
+        .catch(err => console.error('Ping failed', err));
+    }, 5 * 60 * 1000);
 
     const PORT = process.env.PORT;
     server.listen(PORT);
   })
-  .catch(() => {console.log("Failed to connect to DB")});
+  .catch(() => { console.log("Failed to connect to DB") });
