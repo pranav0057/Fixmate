@@ -1,5 +1,4 @@
-import dotenv from "dotenv";
-dotenv.config();
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -17,7 +16,7 @@ initSocket(server);
 app.use(cookieParser());
 app.use(
   cors({
-    origin: "https://fixmate-code.vercel.app",
+    origin: process.env.FRONTEND_URL,
     credentials: true,
   })
 );
@@ -32,4 +31,4 @@ connectDB()
     const PORT = process.env.PORT;
     server.listen(PORT);
   })
-  .catch(() => {});
+  .catch(() => {console.log("Failed to connect to DB")});
