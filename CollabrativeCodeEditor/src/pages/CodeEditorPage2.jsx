@@ -1,9 +1,8 @@
-
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import Editor from "@monaco-editor/react";
 import axios from "axios";
 import { motion, AnimatePresence } from "framer-motion";
-import { MessageSquareCode, X, ChevronDown, Play } from "lucide-react";
+import { MessageSquareCode, X, ChevronDown, Play, Plus } from "lucide-react";
 import AISidebar from "../components/AISidebar";
 import { useAuth } from "../context/AuthContext.jsx";
 import { initVimMode } from "monaco-vim";
@@ -41,11 +40,32 @@ const CodeEditorPage2 = ({
   output = "",
   onUpdate = () => {},
 }) => {
+  // ========== PAGES STATE ==========
+  const [pages, setPages] = useState(() => {
+    const saved = sessionStorage.getItem("solo_pages");
+    return saved ? JSON.parse(saved) : [
+      { id: "page_1", name: "Main", language: "python", code: "", stdin: "", output: "" }
+    ];
+  });
+
+  const [activePageId, setActivePageId] = useState(() => 
+    sessionStorage.getItem("solo_activePageId") || pages[0]?.id
+  );
+
+  const [editingPageId, setEditingPageId] = useState(null);
+
+  const activePage = pages.find((p) => p.id === activePageId) || pages[0];
+
+  // Save pages to sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem("solo_pages", JSON.stringify(pages));
+  }, [pages]);
+
+  useEffect(() => {
+    sessionStorage.setItem("solo_activePageId", activePageId);
+  }, [activePageId]);
+
   // Editor State
-  const [currentLang, setCurrentLang] = useState(sessionStorage.getItem("language") || language);
-  const [currentCode, setCurrentCode] = useState(sessionStorage.getItem("code") || code);
-  const [currentInput, setCurrentInput] = useState(stdin);
-  const [currentOutput, setCurrentOutput] = useState(output);
   const [loading, setLoading] = useState(false);
   
   // Visibility State
@@ -62,17 +82,60 @@ const CodeEditorPage2 = ({
   // Vim State
   const [isVimMode, setIsVimMode] = useState(sessionStorage.getItem("vimMode") === "true"||false);
   const editorRef = useRef(null);
+  const monacoRef = useRef(null);
   const statusBarRef = useRef(null);
   const vimModeRef = useRef(null);
 
-  // Sync props
-  useEffect(() => {sessionStorage.setItem("language", currentLang)}, [currentLang]);
-  useEffect(() => {
-    sessionStorage.setItem("code", currentCode);
-  }, [currentCode]);
-  useEffect(() => setCurrentInput(stdin), [stdin]);
-  useEffect(() => setCurrentOutput(output), [output]);
+  // ========== PAGE FUNCTIONS ==========
+  const addNewPage = () => {
+    const newId = `page_${Date.now()}`;
+    const newPage = {
+      id: newId,
+      name: `Page ${pages.length + 1}`,
+      language: "python",
+      code: "",
+      stdin: "",
+      output: ""
+    };
+    setPages([...pages, newPage]);
+    setActivePageId(newId);
+  };
 
+  const closePage = useCallback((pageId) => {
+    if (pages.length === 1) return; // Don't close last page
+    
+    const newPages = pages.filter((p) => p.id !== pageId);
+    setPages(newPages);
+    
+    if (pageId === activePageId) {
+      setActivePageId(newPages[0].id);
+    }
+  }, [pages, activePageId]);
+
+  const startEditingPageName = (pageId) => {
+    setEditingPageId(pageId);
+  };
+
+  const handlePageNameChange = (pageId, newName) => {
+    const trimmedName = newName.trim();
+    if (trimmedName && trimmedName !== pages.find(p => p.id === pageId)?.name) {
+      setPages((prevPages) =>
+        prevPages.map((p) =>
+          p.id === pageId ? { ...p, name: trimmedName } : p
+        )
+      );
+    }
+    setEditingPageId(null);
+  };
+
+  // ========== UPDATE PAGE CONTENT ==========
+  const updatePage = (updates) => {
+    setPages((prevPages) =>
+      prevPages.map((p) =>
+        p.id === activePageId ? { ...p, ...updates } : p
+      )
+    );
+  };
 
   // Sidebar Resizing
   useEffect(() => {
@@ -94,9 +157,17 @@ const CodeEditorPage2 = ({
 
   const handleEditorMount = (editor, monaco) => {
     editorRef.current = editor;
+    monacoRef.current = monaco;
+    
     if (isVimMode) {
-    vimModeRef.current = initVimMode(editorRef.current, statusBarRef.current);
-  }
+      vimModeRef.current = initVimMode(editor, statusBarRef.current);
+    }
+
+    // Save code on change
+    editor.onDidChangeModelContent(() => {
+      const currentCode = editor.getValue();
+      updatePage({ code: currentCode });
+    });
   };
 
   // Vim Mode Toggle
@@ -127,7 +198,7 @@ const CodeEditorPage2 = ({
   const runCode = async () => {
     setLoading(true);
     setShowOutputPanel(true); // Show output on run
-    setCurrentOutput("Running...");
+    updatePage({ output: "Running..." });
     onUpdate?.({ output: "Running..." });
 
     let result = "";
@@ -136,10 +207,10 @@ const CodeEditorPage2 = ({
 
     try {
       const res = await axios.post("https://emkc.org/api/v2/piston/execute", {
-        language: currentLang,
+        language: activePage.language,
         version: "*",
-        files: [{ name: "main", content: currentCode }],
-        stdin: currentInput,
+        files: [{ name: "main", content: activePage.code }],
+        stdin: activePage.stdin,
       });
 
       const stdout = res.data.run?.stdout?.trim();
@@ -154,7 +225,7 @@ const CodeEditorPage2 = ({
       result = errorOutput;
     } finally {
       setLoading(false);
-      setCurrentOutput(result);
+      updatePage({ output: result });
       onUpdate?.({ output: result });
 
       if (user) {
@@ -164,8 +235,8 @@ const CodeEditorPage2 = ({
           isSuccess: !isError,
           error: isError ? errorOutput.split("\n")[0].trim() : null, 
           category: category, 
-          language: currentLang,
-          code: currentCode,
+          language: activePage.language,
+          code: activePage.code,
         });
       }
     }
@@ -189,15 +260,14 @@ const CodeEditorPage2 = ({
   const handleExplainError = () => {
     setIsSidebarOpen(true);
     if (aiRef.current?.ask) {
-      const aiPrompt = `Help me fix this error:\nCode:\n${currentCode}\nError:\n${currentOutput}`;
+      const aiPrompt = `Help me fix this error:\nCode:\n${activePage.code}\nError:\n${activePage.output}`;
       aiRef.current.ask(aiPrompt);
     }
   };
 
   // Handlers
-  const handleChange = (val) => { setCurrentCode(val || ""); onUpdate?.({ code: val || "" }); };
-  const handleLangChange = (e) => { setCurrentLang(e.target.value); onUpdate?.({ language: e.target.value }); };
-  const handleInputChange = (e) => { setCurrentInput(e.target.value); onUpdate?.({ stdin: e.target.value }); };
+  const handleLangChange = (e) => updatePage({ language: e.target.value });
+  const handleInputChange = (e) => updatePage({ stdin: e.target.value });
 
   return (
     <div className="h-screen bg-slate-900 text-white flex flex-col pt-6 overflow-hidden">
@@ -209,34 +279,99 @@ const CodeEditorPage2 = ({
           {/* 1. EDITOR PANEL (Takes remaining height) */}
           <div className="flex-1 flex flex-col bg-slate-800 rounded-2xl shadow-xl overflow-hidden border border-slate-700/50 relative z-10">
             {/* Toolbar */}
-            <div className="flex items-center justify-between bg-slate-800/80 backdrop-blur px-4 py-3 border-b border-slate-700/50 shrink-0">
-               <h1 className="text-sm font-bold bg-gradient-to-r from-teal-400 to-emerald-400 bg-clip-text text-transparent">
-                 Coding IDE Powered with AI Buddy
-               </h1>
+            <div className="flex items-center justify-between bg-slate-800/80 backdrop-blur px-4 py-3 border-b border-slate-700/50 shrink-0 gap-4">
+               {/* Title - Two Lines */}
+               <div className="flex flex-col">
+                 <h1 className="text-[14px] font-bold bg-gradient-to-r from-teal-400 to-emerald-400 bg-clip-text text-transparent leading-tight">
+                   Coding IDE
+                 </h1>
+                 <h2 className="text-[10px] font-semibold text-slate-400 leading-tight">
+                   Powered with AI Buddy
+                 </h2>
+               </div>
 
+               {/* ========== PAGE TABS (CENTER) - Scrollable Container ========== */}
+               <div className="flex-1 flex items-center justify-center px-4">
+                 <div className="relative max-w-md w-full">
+                   <div 
+                     className="page-tabs flex items-center gap-2 overflow-x-auto pb-1"
+                   >
+                     {pages.map((page) => (
+                       <div
+                         key={page.id}
+                         className={`flex items-center px-3 py-1.5 rounded-md whitespace-nowrap flex-shrink-0 ${
+                           page.id === activePageId
+                             ? "bg-slate-900 text-white border border-cyan-500"
+                             : "text-gray-400 hover:text-white hover:bg-slate-700 border border-transparent"
+                         } ${editingPageId !== page.id ? "cursor-pointer" : "cursor-text"}`}
+                         onClick={() => setActivePageId(page.id)}
+                         onDoubleClick={() => startEditingPageName(page.id)}
+                       >
+                         {editingPageId === page.id ? (
+                           <input
+                             type="text"
+                             defaultValue={page.name}
+                             autoFocus
+                             onFocus={(e) => e.target.select()}
+                             className="bg-slate-700 text-white text-sm p-0 border-none w-20 focus:ring-0 focus:border-none rounded px-1"
+                             onBlur={(e) => handlePageNameChange(page.id, e.target.value)}
+                             onKeyDown={(e) => {
+                               if (e.key === 'Enter') e.currentTarget.blur();
+                               if (e.key === 'Escape') setEditingPageId(null);
+                             }}
+                           />
+                         ) : (
+                           <span className="text-xs truncate max-w-[80px] select-none">{page.name}</span>
+                         )}
+                         
+                         {pages.length > 1 && editingPageId !== page.id && (
+                           <button
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               closePage(page.id);
+                             }}
+                             className="ml-1.5 text-gray-500 hover:text-red-500 transition-colors"
+                           >
+                             <X className="w-3 h-3" />
+                           </button>
+                         )}
+                       </div>
+                     ))}
+                     
+                     <button
+                       onClick={addNewPage}
+                       className="bg-cyan-600 text-white px-2 py-1.5 rounded-md flex items-center hover:bg-cyan-500 hover:scale-105 transition-all flex-shrink-0"
+                     >
+                       <Plus className="w-3 h-3" />
+                     </button>
+                   </div>
+                 </div>
+               </div>
+
+               {/* Right Side Controls */}
                <div className="flex items-center gap-3">
+                 
                  {/* Vim Checkbox */}
-                 <label className="flex items-center gap-2 cursor-pointer bg-slate-900/50 px-3 py-1.5 rounded-full border border-slate-700/50 hover:border-slate-600 transition">
-                   <input
-                     type="checkbox"
-                     checked={isVimMode}
-                     onChange={(e) => setIsVimMode(e.target.checked)}
-                     className="w-3 h-3 rounded border-slate-600 text-cyan-500 focus:ring-0 bg-slate-800"
-                   />
-                   <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Vim Mode</span>
-                 </label>
-
+               <label className="flex items-center gap-2 cursor-pointer bg-slate-900/50 px-3 py-1.5 rounded-full border border-slate-700/50 hover:border-slate-600 transition">
+                 <input
+                   type="checkbox"
+                   checked={isVimMode}
+                   onChange={(e) => setIsVimMode(e.target.checked)}
+                   className="w-3 h-3 rounded border-slate-600 text-cyan-500 focus:ring-0 bg-slate-800"
+                 />
+                 <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Vim Mode</span>
+               </label>
                  <select
-                   value={currentLang}
+                   value={activePage.language}
                    onChange={handleLangChange}
                    className="bg-slate-900 text-white text-xs border border-slate-700 rounded-lg px-2 py-1.5 outline-none focus:border-cyan-500 transition"
                  >
                    <option value="python">Python</option>
                    <option value="javascript">JavaScript</option>
                    <option value="cpp">C++</option>
+                   <option value="c">C</option>
                    <option value="java">Java</option>
                    <option value="go">Go</option>
-
                  </select>
 
                  <button
@@ -254,11 +389,11 @@ const CodeEditorPage2 = ({
             {/* Monaco Editor */}
             <div className="relative flex-1 bg-[#1e1e1e] min-h-0">
               <Editor
+                key={activePageId}
                 height="100%"
                 theme="vs-dark"
-                language={currentLang}
-                value={currentCode}
-                onChange={handleChange}
+                language={activePage.language}
+                value={activePage.code}
                 onMount={handleEditorMount}
                 options={{
                   minimap: { enabled: false },
@@ -294,7 +429,7 @@ const CodeEditorPage2 = ({
                 <span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">Input (Stdin)</span>
               </div>
               <textarea
-                value={currentInput}
+                value={activePage.stdin}
                 onChange={handleInputChange}
                 className="flex-1 w-full p-3 bg-transparent text-slate-300 text-sm font-mono resize-none outline-none focus:bg-slate-800/50 transition custom-scrollbar"
                 placeholder="Enter input for your code here..."
@@ -319,9 +454,9 @@ const CodeEditorPage2 = ({
                   </div>
                   
                   <div className="flex-1 p-3 overflow-auto font-mono text-sm custom-scrollbar bg-slate-900/30">
-                      {currentOutput ? (
-                        <pre className={`${currentOutput.startsWith("Compiler Error") || currentOutput.startsWith("⚠") ? "text-rose-400" : "text-emerald-400"}`}>
-                          {currentOutput}
+                      {activePage.output ? (
+                        <pre className={`${activePage.output.startsWith("Compiler Error") || activePage.output.startsWith("⚠") ? "text-rose-400" : "text-emerald-400"}`}>
+                          {activePage.output}
                         </pre>
                       ) : (
                         <div className="h-full flex items-center justify-center text-slate-600 italic text-xs">
@@ -331,7 +466,7 @@ const CodeEditorPage2 = ({
                   </div>
 
                   {/* Quick Fix AI Button */}
-                  {(currentOutput.startsWith("Compiler Error") || currentOutput.startsWith("⚠")) && (
+                  {(activePage.output.startsWith("Compiler Error") || activePage.output.startsWith("⚠")) && (
                       <motion.button
                         onClick={handleExplainError}
                         initial={{ scale: 0.9, opacity: 0 }}

@@ -11,7 +11,7 @@ const PaginatedVerticalLayout = () => {
   const participants = useParticipants();
   const [currentPage, setCurrentPage] = useState(0);
   
-  const participantsPerPage = 2;
+  const participantsPerPage = 3;
   const totalPages = Math.ceil(participants.length / participantsPerPage);
   
   const startIndex = currentPage * participantsPerPage;

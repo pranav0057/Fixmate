@@ -83,10 +83,7 @@ const VideoPanel = ({ client, call, onStartCall, onLeaveCall,isJoiningCall }) =>
       <StreamTheme>
         <StreamCall call={call}>
           <div className="h-full flex flex-col bg-gray-900 rounded-lg">
-            {/* Paginated layout */}
-            <div className="flex-1 min-h-0">
-              <PaginatedVerticalLayout />
-            </div>
+            
             
             {/* Call controls */}
             <div className="flex justify-center py-2 border-t border-gray-700">
@@ -97,6 +94,10 @@ const VideoPanel = ({ client, call, onStartCall, onLeaveCall,isJoiningCall }) =>
                   onLeaveCall?.();
                 }}
               />
+            </div>
+            {/* Paginated layout */}
+            <div className="flex-1 min-h-0">
+              <PaginatedVerticalLayout />
             </div>
           </div>
         </StreamCall>
