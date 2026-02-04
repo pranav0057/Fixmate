@@ -60,7 +60,7 @@ const ActionMenu = ({
       // Check space below the button to decide if menu goes UP or DOWN
       const rect = buttonRef.current.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
-      
+
       // If less than 160px space below, open UPWARDS
       setDirection(spaceBelow < 160 ? "up" : "down");
     }
@@ -87,33 +87,32 @@ const ActionMenu = ({
               className="fixed inset-0 z-40"
               onClick={() => setOpen(false)}
             />
-            
+
             <motion.div
               // Animate based on direction
-              initial={{ 
-                opacity: 0, 
-                scale: 0.9, 
-                y: direction === "up" ? 10 : -10 
+              initial={{
+                opacity: 0,
+                scale: 0.9,
+                y: direction === "up" ? 10 : -10
               }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ 
-                opacity: 0, 
-                scale: 0.9, 
-                y: direction === "up" ? 10 : -10 
+              exit={{
+                opacity: 0,
+                scale: 0.9,
+                y: direction === "up" ? 10 : -10
               }}
-              transition={{ 
-                type: "spring", 
-                stiffness: 400, 
-                damping: 25 
+              transition={{
+                type: "spring",
+                stiffness: 400,
+                damping: 25
               }}
               // CSS Classes for positioning: 
               // 'bottom-full mb-2' pushes it UP
               // 'top-full mt-2' pushes it DOWN
-              className={`absolute right-0 w-40 bg-gray-800/90 backdrop-blur-xl border-2 rounded-xl shadow-2xl z-50 ${
-                direction === "up" 
-                  ? "bottom-full mb-2 origin-bottom-right" 
-                  : "top-full mt-2 origin-top-right"
-              }`}
+              className={`absolute right-0 w-40 bg-gray-800/90 backdrop-blur-xl border-2 rounded-xl shadow-2xl z-50 ${direction === "up"
+                ? "bottom-full mb-2 origin-bottom-right"
+                : "top-full mt-2 origin-top-right"
+                }`}
               style={{
                 borderColor: 'rgba(45, 212, 191, 0.35)',
                 boxShadow: '0 20px 50px rgba(0, 0, 0, 0.5), 0 0 20px rgba(45, 212, 191, 0.1)'
@@ -169,9 +168,26 @@ const ParticipantsListTemplate = ({
   onRemoveParticipant,
   onChangeOwner,
 }) => {
+  const totalCount = participants.length;
+  const inCallCount = participants.filter(
+    (p) => getMediaState(p.userId).isInCall
+  ).length;
   return (
-    <div className="h-full bg-gray-900 text-gray-200 flex flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto py-2 space-y-2 ">
+    <div className="h-full text-gray-200 flex flex-col overflow-hidden relative">
+      <div
+  className="
+    flex-1
+    rounded-2xl
+    bg-white/5
+    backdrop-blur-xl
+    border border-white/10
+    shadow-xl
+    p-2
+    mb-18
+    overflow-hidden
+  "
+>
+      <div className="h-full overflow-y-auto space-y-2  bg-gray-900/85 rounded-xl">
         {participants.map((p) => {
           const media = getMediaState(p.userId);
           const isOwnerUser = p.userId === ownerId;
@@ -180,7 +196,7 @@ const ParticipantsListTemplate = ({
           return (
             <div
               key={p.userId}
-              className="flex items-center gap-3 px-2 py-2 bg-gray-800 rounded-lg mr-2"
+              className="flex items-center gap-3 px-2 py-2 bg-gray-800 rounded-lg mr-4 ml-3 my-3"
             >
               {/* Avatar */}
               <div className="relative">
@@ -253,6 +269,52 @@ const ParticipantsListTemplate = ({
           );
         })}
       </div>
+      </div>
+
+      {/* Floating status capsule (space reserved for chat toggle on right) */}
+<div className="absolute bottom-3 left-3 pointer-events-none z-40">
+  <div
+    className="
+      flex items-center
+      gap-3 
+      px-3 py-2
+      rounded-full
+      bg-gray-800/80
+      backdrop-blur-xl
+      border border-gray-700/50
+      shadow-lg
+      pr-6   /* visual breathing room */
+    "
+  >
+    {/* LIVE */}
+    <div
+      className="
+        flex items-center gap-2
+        px-3 py-1
+        rounded-full
+        bg-emerald-500/10
+        text-emerald-400
+        text-[14px] font-semibold
+        border border-emerald-500/20
+      "
+    >
+      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+      LIVE
+    </div>
+
+    {/* Divider */}
+    <span className="h-4 w-px bg-gray-600/60" />
+
+    {/* Count */}
+    <span className="text-[13px] text-gray-300 font-medium">
+      <span className="text-white">{inCallCount}</span>
+      <span className="mx-1 text-gray-500">of</span>
+      {totalCount}
+      <span className="ml-1 text-gray-500">in call</span>
+    </span>
+  </div>
+</div>
+
     </div>
   );
 };
@@ -295,7 +357,7 @@ const DumbList = ({ participants, ...props }) => {
     const p = participants.find((x) => x.userId === userId);
     return {
       hasStream: false,
-      isInCall: p?.isInCall , 
+      isInCall: p?.isInCall,
       isAudioOn: false,
       isVideoOn: false,
       isSpeaking: false,

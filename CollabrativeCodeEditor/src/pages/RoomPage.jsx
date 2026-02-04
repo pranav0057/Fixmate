@@ -563,15 +563,22 @@ const RoomPage = () => {
 
         {/* Right Panel: Participants Toggle + Video */}
         <Panel defaultSize={25} minSize={20}>
-          <div className="w-full h-full bg-gray-800 flex flex-col overflow-hidden ">
+          <div className="w-full h-full bg-gray-900 flex flex-col overflow-hidden  ">
             {/* Toggle Button */}
-            <div className="p-4 border-b border-gray-700 shrink-0">
               <button
                 onClick={() => setShowParticipants((p) => !p)}
-                className="flex w-full items-center justify-center space-x-2 px-3 py-2
-                           bg-gradient-to-r from-green-500 to-blue-500
-                           hover:from-green-600 hover:to-blue-600
-                           rounded-lg text-white font-bold transition-all"
+                className="m-2
+              shrink-0
+              flex w-[calc(100%-1rem)] items-center justify-center gap-2
+              px-6 py-3
+              rounded-full
+              bg-gradient-to-r from-green-500 to-blue-500
+              hover:from-green-600 hover:to-blue-600
+              text-white font-semibold
+              border border-white/10
+              backdrop-blur
+              shadow-md
+              transition-all"
               >
                 <Users className="w-4 h-4" />
                 <span>
@@ -580,12 +587,12 @@ const RoomPage = () => {
                     : `Participants (${participants.length})`}
                 </span>
               </button>
-            </div>
 
             {/* Content Switch */}
             <div className="flex-1 overflow-hidden flex flex-col relative h-full">
               {/* Participants List */}
               <div className={`absolute inset-0 ${showParticipants ? 'block' : 'hidden'}`}>
+                
                 <ParticipantsList
                   participants={participants}
                   client={client}
@@ -616,7 +623,7 @@ const RoomPage = () => {
       {/* Floating Chat Button */}
       <button
         onClick={toggleChatPanel}
-        className="absolute bottom-6 right-6 p-3 bg-gradient-to-r from-teal-500 via-cyan-200 to-emerald-200 hover:bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 text-white rounded-full shadow-lg transition-transform transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 z-50"
+        className="absolute bottom-3 right-4 p-3 bg-gradient-to-r from-teal-500 via-cyan-200 to-emerald-200 hover:bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 text-white rounded-full shadow-lg transition-transform transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 z-50"
         title={isChatOpen ? "Hide Chat" : "Show Chat"}
       >
         <MessageSquare className="w-6 h-6" />
