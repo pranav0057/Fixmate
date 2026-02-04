@@ -1,7 +1,14 @@
-
-
-import React from "react";
-import { Crown, Mic, MicOff, Video, VideoOff, UserX } from "lucide-react";
+import React, { useState, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Crown,
+  Mic,
+  MicOff,
+  Video,
+  VideoOff,
+  UserX,
+  MoreVertical,
+} from "lucide-react";
 import {
   StreamVideo,
   StreamCall,
@@ -10,206 +17,238 @@ import {
   hasVideo,
 } from "@stream-io/video-react-sdk";
 
+/* ================= UTILS & HELPERS ================= */
 
-const StreamAwareList = ({
-  participants = [],
+const getAvatarUrl = (name) => {
+  const encodedName = encodeURIComponent(name || "?");
+  return `https://ui-avatars.com/api/?name=${encodedName}&background=random&color=fff&size=128&bold=true`;
+};
+
+const PulseDot = () => (
+  <div className="absolute bottom-0 right-0 translate-x-[10%] translate-y-[10%] flex h-4 w-4">
+    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+    <span className="relative inline-flex rounded-full h-4 w-4 bg-green-500 border-2 border-gray-900"></span>
+  </div>
+);
+
+/* ================= ACTION MENU (SMART POSITIONING) ================= */
+
+const ActionMenu = ({
+  participant,
   ownerId,
   currentUserId,
+  isOwner,
   onRemoveParticipant,
+  onChangeOwner,
 }) => {
-  const { useParticipants } = useCallStateHooks();
-  const streamParticipants = useParticipants();
+  const [open, setOpen] = useState(false);
+  const [direction, setDirection] = useState("down"); // 'up' or 'down'
+  const buttonRef = useRef(null);
 
-  const streamParticipantMap = new Map(
-    streamParticipants.map((p) => [p.userId, p])
-  );
+  if (!isOwner || participant.userId === currentUserId) return null;
 
-  const isOwner = currentUserId === ownerId;
+  const handleToggle = () => {
+    if (!open && buttonRef.current) {
+      // 1. SCROLL INTO VIEW
+      // If the row is partially hidden, scroll it into view gently
+      buttonRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+
+      // 2. SMART POSITIONING (Auto-Flip)
+      // Check space below the button to decide if menu goes UP or DOWN
+      const rect = buttonRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      
+      // If less than 160px space below, open UPWARDS
+      setDirection(spaceBelow < 160 ? "up" : "down");
+    }
+    setOpen((v) => !v);
+  };
 
   return (
-    <div className="p-4 bg-gray-900 h-full text-gray-200">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold">Participants</h3>
-        <span className="text-xs text-gray-400 bg-gray-700 px-2 py-1 rounded-full">
-          {participants.length} online
-        </span>
-      </div>
+    <div className="relative">
+      <motion.button
+        ref={buttonRef}
+        onClick={handleToggle}
+        className="p-1 rounded hover:bg-gray-700 transition-colors"
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.95 }}
+      >
+        <MoreVertical className="w-4 h-4 text-gray-400" />
+      </motion.button>
 
-      {/* Empty state */}
-      {participants.length === 0 && (
-        <p className="text-gray-500 text-sm">No one’s here yet 👀</p>
-      )}
-
-      {/* Participants list */}
-      <div className="space-y-3 overflow-y-auto max-h-[calc(100vh-200px)] pr-1">
-        {participants.map((p) => {
-          const streamData = streamParticipantMap.get(p.userId);
-
-          const isInCall = !!streamData;
-          const isAudioOn = isInCall ? hasAudio(streamData) : false;
-          const isVideoOn = isInCall ? hasVideo(streamData) : false;
-          const isSpeaking = !!streamData?.isSpeaking;
-          const audioLevel = streamData?.audioLevel || 0;
-
-          const isParticipantOwner = p.userId === ownerId;
-          const canRemove =
-            isOwner && !isParticipantOwner && p.userId !== currentUserId;
-
-          const ringStyle = {
-            transition: "all 0.1s ease-out",
-            borderColor: isSpeaking ? "#34D399" : "#4B5563",
-            boxShadow: isSpeaking
-              ? `0 0 8px 2px rgba(52, 211, 153, ${Math.min(audioLevel * 5, 1)})`
-              : "none",
-            borderWidth: "2px",
-          };
-
-          return (
+      <AnimatePresence>
+        {open && (
+          <>
+            {/* Backdrop to close menu */}
             <div
-              key={p.userId}
-              className="flex items-center space-x-3 p-2 bg-gray-800 rounded-lg group"
+              className="fixed inset-0 z-40"
+              onClick={() => setOpen(false)}
+            />
+            
+            <motion.div
+              // Animate based on direction
+              initial={{ 
+                opacity: 0, 
+                scale: 0.9, 
+                y: direction === "up" ? 10 : -10 
+              }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ 
+                opacity: 0, 
+                scale: 0.9, 
+                y: direction === "up" ? 10 : -10 
+              }}
+              transition={{ 
+                type: "spring", 
+                stiffness: 400, 
+                damping: 25 
+              }}
+              // CSS Classes for positioning: 
+              // 'bottom-full mb-2' pushes it UP
+              // 'top-full mt-2' pushes it DOWN
+              className={`absolute right-0 w-40 bg-gray-800/90 backdrop-blur-xl border-2 rounded-xl shadow-2xl z-50 ${
+                direction === "up" 
+                  ? "bottom-full mb-2 origin-bottom-right" 
+                  : "top-full mt-2 origin-top-right"
+              }`}
+              style={{
+                borderColor: 'rgba(45, 212, 191, 0.35)',
+                boxShadow: '0 20px 50px rgba(0, 0, 0, 0.5), 0 0 20px rgba(45, 212, 191, 0.1)'
+              }}
             >
-              {/* Avatar with speaking ring */}
-              <div className="relative">
-                <div
-                  style={ringStyle}
-                  className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0"
-                >
-                  <span className="text-sm font-semibold text-white">
-                    {p.avatar || p.name?.[0]?.toUpperCase() || "?"}
-                  </span>
-                </div>
-                {p.isOnline && (
-                  <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-800"></div>
-                )}
-              </div>
-
-              {/* Name */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center space-x-2">
-                  <span className="font-medium text-sm truncate">{p.name}</span>
-                  {isParticipantOwner && (
-                    <Crown className="w-3 h-3 text-yellow-400" title="Owner" />
-                  )}
-                </div>
-              </div>
-
-              {/* Status Icons */}
-              <div className="flex items-center space-x-2">
-                {isInCall ? (
-                  <>
-                    {isAudioOn ? (
-                      <Mic className="w-4 h-4 text-gray-300" title="Unmuted" />
-                    ) : (
-                      <MicOff
-                        className="w-4 h-4 text-red-400"
-                        title="Muted"
-                      />
-                    )}
-                    {isVideoOn ? (
-                      <Video
-                        className="w-4 h-4 text-gray-300"
-                        title="Video On"
-                      />
-                    ) : (
-                      <VideoOff
-                        className="w-4 h-4 text-red-400"
-                        title="Video Off"
-                      />
-                    )}
-                  </>
-                ) : (
-                  <span className="text-xs text-gray-500 italic">
-                    Not in call
-                  </span>
-                )}
-
-                {/* Remove button */}
-                {canRemove && (
-                  <button
-                    onClick={() => onRemoveParticipant(p.userId)}
-                    className="transition-opacity p-1 hover:bg-red-600 rounded"
-                    title="Remove participant"
+              <div className="py-0.5">
+                {participant.userId !== ownerId && (
+                  <motion.button
+                    onClick={() => {
+                      setOpen(false);
+                      onChangeOwner(participant.userId, participant.name);
+                    }}
+                    whileHover={{ x: 2 }}
+                    className="w-full px-2.5 py-2 text-xs text-left hover:bg-gray-700/50 transition-colors flex items-center gap-2 group"
                   >
-                    <UserX className="w-4 h-4 text-red-400 hover:text-white" />
-                  </button>
+                    <div className="w-6 h-6 rounded-lg bg-amber-500/20 flex items-center justify-center group-hover:bg-amber-500/30 transition-colors">
+                      <Crown className="w-3.5 h-3.5 text-amber-400" />
+                    </div>
+                    <span className="text-gray-200">Make owner</span>
+                  </motion.button>
                 )}
+
+                <motion.button
+                  onClick={() => {
+                    setOpen(false);
+                    onRemoveParticipant(participant.userId);
+                  }}
+                  whileHover={{ x: 2 }}
+                  className="w-full px-2.5 py-2 text-xs text-left hover:bg-red-500/20 transition-colors flex items-center gap-2 group"
+                >
+                  <div className="w-6 h-6 rounded-lg bg-rose-500/20 flex items-center justify-center group-hover:bg-rose-500/30 transition-colors">
+                    <UserX className="w-3.5 h-3.5 text-red-400" />
+                  </div>
+                  <span className="text-red-400 group-hover:text-red-300">Remove</span>
+                </motion.button>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
 
-const DumbList = ({
-  participants = [],
+/* ================= UI TEMPLATE ================= */
+
+const ParticipantsListTemplate = ({
+  participants,
   ownerId,
   currentUserId,
+  isOwner,
+  getMediaState,
   onRemoveParticipant,
+  onChangeOwner,
 }) => {
-  const isOwner = currentUserId === ownerId;
-
   return (
-    <div className="p-4 bg-gray-900 h-full text-gray-200">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold">Participants</h3>
-        <span className="text-xs text-gray-400 bg-gray-700 px-2 py-1 rounded-full">
-          {participants.length} online
-        </span>
-      </div>
-
-      {/* Empty state */}
-      {participants.length === 0 && (
-        <p className="text-gray-500 text-sm">No one’s here yet 👀</p>
-      )}
-
-      {/* Participants list (no call data) */}
-      <div className="space-y-3 overflow-y-auto max-h-[calc(100vh-200px)] pr-1">
+    <div className="h-full bg-gray-900 text-gray-200 flex flex-col overflow-hidden">
+      <div className="flex-1 overflow-y-auto py-2 space-y-2 ">
         {participants.map((p) => {
-          const isParticipantOwner = p.userId === ownerId;
-          const canRemove =
-            isOwner && !isParticipantOwner && p.userId !== currentUserId;
+          const media = getMediaState(p.userId);
+          const isOwnerUser = p.userId === ownerId;
+          const isMe = p.userId === currentUserId;
 
           return (
             <div
               key={p.userId}
-              className="flex items-center space-x-3 p-2 bg-gray-800 rounded-lg group"
+              className="flex items-center gap-3 px-2 py-2 bg-gray-800 rounded-lg mr-2"
             >
               {/* Avatar */}
               <div className="relative">
-                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
-                  <span className="text-sm font-semibold text-white">
-                    {p.avatar || p.name?.[0]?.toUpperCase() || "?"}
-                  </span>
-                </div>
-                {p.isOnline && (
-                  <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-800"></div>
-                )}
+                <img
+                  src={getAvatarUrl(p.name)}
+                  alt={p.name}
+                  className="w-9 h-9 rounded-full"
+                  style={{
+                    border: media.isSpeaking
+                      ? "2px solid #34D399"
+                      : "2px solid transparent",
+                  }}
+                />
+                {media.isInCall && <PulseDot />}
               </div>
+
               {/* Name */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center space-x-2">
-                  <span className="font-medium text-sm truncate">{p.name}</span>
-                  {isParticipantOwner && (
-                    <Crown className="w-3 h-3 text-yellow-400" title="Owner" />
+                <div className="flex items-center gap-1">
+                  <span className="truncate text-[15px]">{p.name}</span>
+                  {isMe && (
+                    <span className="text-[10px] font-semibold bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">
+                      You
+                    </span>
+                  )}
+                  {isOwnerUser && (
+                    <Crown className="w-3 h-3 text-yellow-400 fill-yellow-400" />
+                  )}
+                </div>
+                <div className="text-[10px] mt-0.7 ml-0.5">
+                  {media.isInCall ? (
+                    <span className="text-emerald-400">In Call</span>
+                  ) : (
+                    <span className="text-gray-500">Not in call</span>
                   )}
                 </div>
               </div>
 
-              {/* Remove button */}
-              {canRemove && (
-                <button
-                  onClick={() => onRemoveParticipant(p.userId)}
-                  className="transition-opacity p-1 hover:bg-red-600 rounded"
-                  title="Remove participant"
-                >
-                  <UserX className="w-4 h-4 text-red-400 hover:text-white" />
-                </button>
-              )}
+              {/* STATUS */}
+              <div className="flex items-center gap-2">
+                {media.isInCall && media.hasStream && (
+                  <>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${media.isAudioOn ? 'bg-gray-700' : 'bg-red-500/20'}`}>
+                      {media.isAudioOn ? (
+                        <Mic className="w-4 h-4 text-gray-300" />
+                      ) : (
+                        <MicOff className="w-4 h-4 text-red-400" />
+                      )}
+                    </div>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${media.isVideoOn ? 'bg-gray-700' : 'bg-red-500/20'}`}>
+                      {media.isVideoOn ? (
+                        <Video className="w-4 h-4 text-gray-300" />
+                      ) : (
+                        <VideoOff className="w-4 h-4 text-red-400" />
+                      )}
+                    </div>
+                  </>
+                )}
+
+                <ActionMenu
+                  participant={p}
+                  ownerId={ownerId}
+                  currentUserId={currentUserId}
+                  isOwner={isOwner}
+                  onRemoveParticipant={onRemoveParticipant}
+                  onChangeOwner={onChangeOwner}
+                />
+              </div>
             </div>
           );
         })}
@@ -217,51 +256,102 @@ const DumbList = ({
     </div>
   );
 };
+
+/* ================= STREAM WRAPPER ================= */
+
+const StreamAwareList = (props) => {
+  const { useParticipants } = useCallStateHooks();
+  const streamParticipants = useParticipants();
+
+  const streamMap = new Map(
+    streamParticipants.map((p) => [p.userId, p])
+  );
+
+  const getMediaState = (userId) => {
+    const sp = streamMap.get(userId);
+    return {
+      hasStream: !!sp,
+      isInCall: !!sp,
+      isAudioOn: sp ? hasAudio(sp) : false,
+      isVideoOn: sp ? hasVideo(sp) : false,
+      isSpeaking: !!sp?.isSpeaking,
+      audioLevel: sp?.audioLevel || 0,
+    };
+  };
+
+  return (
+    <ParticipantsListTemplate
+      {...props}
+      isOwner={props.currentUserId === props.ownerId}
+      getMediaState={getMediaState}
+    />
+  );
+};
+
+/* ================= NON-CALLER WRAPPER ================= */
+
+const DumbList = ({ participants, ...props }) => {
+  const getMediaState = (userId) => {
+    const p = participants.find((x) => x.userId === userId);
+    return {
+      hasStream: false,
+      isInCall: p?.isInCall , 
+      isAudioOn: false,
+      isVideoOn: false,
+      isSpeaking: false,
+      audioLevel: 0,
+    };
+  };
+
+  return (
+    <ParticipantsListTemplate
+      {...props}
+      participants={participants}
+      isOwner={props.currentUserId === props.ownerId}
+      getMediaState={getMediaState}
+    />
+  );
+};
+
+/* ================= MAIN EXPORT ================= */
 
 const ParticipantsList = ({
   participants = [],
   client,
   call,
   ownerId,
-  currentUserId, // We need this for sorting
+  currentUserId,
   onRemoveParticipant,
+  onChangeOwner,
 }) => {
 
-  const getSortPriority = (participant) => {
-    if (participant.userId === currentUserId) {
-      return 1; // Current user always comes first
-    }
-    if (participant.userId === ownerId) {
-      return 2; // Owner comes second
-    }
-    return 3; // Everyone else comes after
-  };
-
-  // Create a new sorted array.
-  const sortedParticipants = [...participants].sort(
-    (a, b) => getSortPriority(a) - getSortPriority(b)
-  );
+  const sorted = [...participants].sort((a, b) => {
+    if (a.userId === currentUserId) return -1;
+    if (a.userId === ownerId) return -1;
+    return 0;
+  });
 
   if (!client || !call) {
     return (
       <DumbList
-        participants={sortedParticipants} // <-- Pass the sorted list
+        participants={sorted}
         ownerId={ownerId}
         currentUserId={currentUserId}
         onRemoveParticipant={onRemoveParticipant}
+        onChangeOwner={onChangeOwner}
       />
     );
   }
 
-  // If the local user *is* in a call, render the "StreamAwareList"
   return (
     <StreamVideo client={client}>
       <StreamCall call={call}>
         <StreamAwareList
-          participants={sortedParticipants} // <-- Pass the sorted list
+          participants={sorted}
           ownerId={ownerId}
           currentUserId={currentUserId}
           onRemoveParticipant={onRemoveParticipant}
+          onChangeOwner={onChangeOwner}
         />
       </StreamCall>
     </StreamVideo>

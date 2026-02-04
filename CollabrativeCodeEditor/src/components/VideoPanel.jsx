@@ -11,7 +11,7 @@ import "@stream-io/video-react-sdk/dist/css/styles.css";
 import PaginatedVerticalLayout from "./CustomLayout";
 import connectCallImage from "../assets/Image.png"; 
 
-const VideoPanel = ({ client, call, onStartCall, onLeaveCall,isJoiningCall }) => {
+const VideoPanel = ({ client, call, onStartCall, onLeaveCall,isJoiningCall,windows }) => {
   const [isConnecting, setIsConnecting] = React.useState(false);
 
   useEffect(() => {
@@ -97,7 +97,7 @@ const VideoPanel = ({ client, call, onStartCall, onLeaveCall,isJoiningCall }) =>
             </div>
             {/* Paginated layout */}
             <div className="flex-1 min-h-0">
-              <PaginatedVerticalLayout />
+              <PaginatedVerticalLayout windows={windows} />
             </div>
           </div>
         </StreamCall>

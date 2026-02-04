@@ -17,6 +17,5 @@ export const initStreamClient = async (userId, userName) => {
     image: `https://getstream.io/random_svg/?id=${userId}&name=${userName}`,
   };
   await client.connectUser(user, data.token);
-  console.log("✅ Stream user connected:", user);
   return client;
 };

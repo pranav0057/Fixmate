@@ -172,7 +172,7 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
     });
   };
 
-  /* ---------------- INPUT ---------------- */
+  /* INPUT */
   const handleInputChange = (e) => {
     const val = e.target.value;
     setStdin(val);
@@ -222,7 +222,7 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
       result = isError ? `Compiler Error:\n${errorOutput}` : stdout || "No output";
     } catch (err) {
       isError = true;
-      result = "⚠ Internal Error running code.";
+      result = "Internal Error running code";
     } finally {
       setLoading(false);
       setOutput(result);
@@ -240,7 +240,7 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
   return (
     <div className="h-full bg-slate-900 text-white flex flex-col overflow-hidden">
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col gap-3 pt-2 min-h-0">
+      <div className="flex-1 flex flex-col gap-3 min-h-0">
         
         {/* EDITOR PANEL (Takes remaining height) */}
         <div className="flex-1 flex flex-col bg-slate-800 rounded-xl shadow-xl overflow-hidden border border-slate-700/50">

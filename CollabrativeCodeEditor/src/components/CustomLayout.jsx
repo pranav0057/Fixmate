@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import {
   useCallStateHooks,
@@ -6,12 +5,12 @@ import {
 } from "@stream-io/video-react-sdk";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-const PaginatedVerticalLayout = () => {
+const PaginatedVerticalLayout = ({windows}) => {
   const { useParticipants } = useCallStateHooks();
   const participants = useParticipants();
   const [currentPage, setCurrentPage] = useState(0);
   
-  const participantsPerPage = 3;
+  const participantsPerPage = windows;
   const totalPages = Math.ceil(participants.length / participantsPerPage);
   
   const startIndex = currentPage * participantsPerPage;
@@ -31,7 +30,7 @@ const PaginatedVerticalLayout = () => {
   };
 
   return (
-    <div className="relative h-full flex flex-col bg-gray-900">
+    <div className="relative h-full w-full flex flex-col bg-gray-900">
       {/* Video Grid */}
       <div className="flex-1 flex flex-col gap-3 p-3 items-center justify-center overflow-hidden">
         {currentParticipants.length === 0 ? (
@@ -42,7 +41,7 @@ const PaginatedVerticalLayout = () => {
           currentParticipants.map((participant) => (
             <div 
               key={participant.sessionId}
-              className="w-full max-w-md h-40 bg-gray-800 rounded-lg overflow-hidden shadow-lg"
+              className="w-full h-40 bg-gray-800 rounded-lg overflow-hidden shadow-lg"
             >
               <ParticipantView participant={participant} />
             </div>

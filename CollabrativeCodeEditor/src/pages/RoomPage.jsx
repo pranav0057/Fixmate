@@ -26,7 +26,7 @@ import {
   PanelGroup,
   PanelResizeHandle,
 } from "react-resizable-panels";
-import toast from "react-hot-toast"; 
+import toast from "react-hot-toast";
 
 const RoomPage = () => {
   const { roomId } = useParams();
@@ -34,8 +34,6 @@ const RoomPage = () => {
   const navigate = useNavigate();
   const userName = searchParams.get("name") || "Guest";
   const userId = getUserId();
-
-  //  Stream client + call state
   const [client, setClient] = useState(null);
   const [call, setCall] = useState(null);
   const [isJoiningCall, setIsJoiningCall] = useState(false);
@@ -47,31 +45,21 @@ const RoomPage = () => {
     message: "",
     onConfirm: null,
   });
-
-  //  State to track which page is being edited
   const [editingPageId, setEditingPageId] = useState(null);
-
   const confirmAction = (title, message, onConfirm) => {
     setConfirmation({ open: true, title, message, onConfirm });
   };
-  
   const [ownerId, setOwnerId] = useState(
     () => sessionStorage.getItem("ownerId") || null
   );
-
-  // Load pages from session storage on mount
   const [pages, setPages] = useState(() => {
     const saved = sessionStorage.getItem(`pages_${roomId}`);
     return saved ? JSON.parse(saved) : [];
   });
-
   const [activePageId, setActivePageId] = useState(
     () => sessionStorage.getItem(`activePageId_${roomId}`) || null
   );
-  
   const activePage = pages.find((p) => p.id === activePageId);
-
-  // State and Ref for Chat Panel Toggle
   const [isChatOpen, setIsChatOpen] = useState(true);
   const chatPanelRef = useRef(null);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -81,7 +69,6 @@ const RoomPage = () => {
     window.history.pushState(null, "", window.location.href);
   }, []);
 
-  // Helper for all exit scenarios
   const cleanExit = async (reason) => {
     window.removeEventListener("popstate", onBackButtonEvent);
     sessionStorage.clear();
@@ -99,19 +86,18 @@ const RoomPage = () => {
         console.warn("Error disconnecting client:", err);
       }
     }
-    
     toast.error(reason || "Disconnected from room");
     navigate("/");
   };
 
-  // Save pages to session storage whenever they change
+
+
   useEffect(() => {
     if (pages.length > 0) {
       sessionStorage.setItem(`pages_${roomId}`, JSON.stringify(pages));
     }
   }, [pages, roomId]);
 
-  // Save active page ID to session storage
   useEffect(() => {
     if (activePageId) {
       sessionStorage.setItem(`activePageId_${roomId}`, activePageId);
@@ -123,29 +109,30 @@ const RoomPage = () => {
   useEffect(() => {
     window.history.pushState(null, "", window.location.href);
     window.addEventListener("popstate", onBackButtonEvent);
-
     return () => {
       window.removeEventListener("popstate", onBackButtonEvent);
     };
   }, [onBackButtonEvent]);
 
+  // Socket room connection - runs ONCE per room
   useEffect(() => {
     if (!socket || !roomId || !userId) return;
 
-    // --- Event Handlers ---
     const handlePagesUpdate = (allPages) => {
       setPages(allPages);
-      const stillExists = allPages.some((p) => p.id === activePageId);
-      if (!stillExists && allPages.length > 0) {
-        setActivePageId(allPages[0].id);
-      } else if (allPages.length === 0) {
-        setActivePageId(null);
-      }
+      setActivePageId((currentActive) => {
+        const stillExists = allPages.some((p) => p.id === currentActive);
+        if (!stillExists && allPages.length > 0) {
+          return allPages[0].id;
+        } else if (allPages.length === 0) {
+          return null;
+        }
+        return currentActive;
+      });
     };
 
     const handleContentUpdate = ({ pageId, userId: senderId, updates }) => {
-      if (senderId === userId) return; // Don't update from own changes
-      
+      if (senderId === userId) return;
       setPages((prevPages) =>
         prevPages.map((p) =>
           p.id === pageId ? { ...p, ...updates } : p
@@ -154,7 +141,25 @@ const RoomPage = () => {
     };
 
     const handleParticipants = (list) => {
+      console.log("Received participants update:", list);
       setParticipants(list);
+    };
+
+    const handleOwnerChanged = ({ ownerId: newOwnerId }) => {
+      sessionStorage.setItem("ownerId", newOwnerId);
+      setOwnerId(newOwnerId);
+
+      if (newOwnerId === userId) {
+        toast.success("You are now the room owner");
+      } else {
+        setParticipants((prevParticipants) => {
+          const newOwner = prevParticipants.find(p => p.userId === newOwnerId);
+          if (newOwner) {
+            toast.success(`${newOwner.name} is now the room owner`);
+          }
+          return prevParticipants;
+        });
+      }
     };
 
     const handleKicked = (data) => {
@@ -167,12 +172,10 @@ const RoomPage = () => {
     };
 
     const handleOwner = ({ isOwner }) => {
-      console.log(isOwner);
-      sessionStorage.setItem("ownerId", userId); 
+      sessionStorage.setItem("ownerId", userId);
       setOwnerId(userId);
     };
 
-    // --- Socket Setup ---
     socket.on("participants-update", handleParticipants);
     socket.on("pages-update", handlePagesUpdate);
     socket.on("content-update", handleContentUpdate);
@@ -183,10 +186,10 @@ const RoomPage = () => {
       sessionStorage.setItem("ownerId", ownerId);
       setOwnerId(ownerId);
     });
-    
+    socket.on("room-owner-changed", handleOwnerChanged);
+
     socket.emit("join-room", { roomId, userName, userId });
 
-    // --- Cleanup ---
     return () => {
       socket.emit("leave-room", { roomId, userId });
       socket.off("participants-update", handleParticipants);
@@ -196,15 +199,16 @@ const RoomPage = () => {
       socket.off("room-ended", handleRoomEnded);
       socket.off("room-owner-assigned", handleOwner);
       socket.off("get-room-owner");
+      socket.off("room-owner-changed", handleOwnerChanged);
     };
-  }, [roomId, userName, userId, activePageId, navigate, call, client]);
+  }, [roomId, userName, userId]); // ✅ No call/client dependencies!
 
   const handleStartCall = async () => {
     if (isJoiningCall || sessionStorage.getItem("activeCallId")) {
       return;
     }
-    setIsJoiningCall(true);
 
+    setIsJoiningCall(true);
     try {
       const videoClient = await initStreamClient(userId, userName);
       const newCall = videoClient.call("default", roomId);
@@ -212,7 +216,13 @@ const RoomPage = () => {
       sessionStorage.setItem("activeCallId", newCall.id);
       setClient(videoClient);
       setCall(newCall);
-      console.log("Joined Stream call:", roomId);
+
+      console.log("socket update sent");
+      socket.emit("user-status-update", {
+        roomId,
+        userId,
+        status: { isInCall: true }
+      });
       toast.success("Joined Stream call!");
     } catch (err) {
       console.error("Stream init error:", err);
@@ -222,25 +232,27 @@ const RoomPage = () => {
     }
   };
 
-  // 🔄 Restore previous call on reload
   useEffect(() => {
     const restoreCall = async () => {
       const savedCallId = sessionStorage.getItem("activeCallId");
       if (!savedCallId || !userId) return;
       try {
-        console.log("Attempting to restore call:", savedCallId);
         const videoClient = await initStreamClient(userId, userName);
         const existingCall = videoClient.call("default", savedCallId);
         await existingCall.join();
+
+        socket.emit("user-status-update", {
+          roomId,
+          userId,
+          status: { isInCall: true }
+        });
         existingCall.on("call.left", () => {
-          console.log("User left call");
           sessionStorage.removeItem("activeCallId");
           setCall(null);
           setClient(null);
         });
         setClient(videoClient);
         setCall(existingCall);
-        console.log("Reconnected to Stream call:", savedCallId);
         toast("Reconnected to previous call.");
       } catch (err) {
         console.error("Failed to restore call:", err);
@@ -248,30 +260,31 @@ const RoomPage = () => {
       }
     };
     restoreCall();
-  }, [userId, userName]);
+  }, [userId, userName, roomId]);
 
-  // Handle unread message notifications
   useEffect(() => {
     if (!socket) return;
-
     const handleNewMessage = () => {
-      // If chat is CLOSED, increment counter
       if (!isChatOpen) {
         setUnreadCount((prev) => prev + 1);
         toast("New message received", { icon: "💬" });
       }
     };
-
     socket.on("receive-message", handleNewMessage);
-
     return () => {
       socket.off("receive-message", handleNewMessage);
     };
   }, [socket, isChatOpen]);
 
   const handleLeaveCall = () => {
-    console.log("Cleaning up after call end");
     sessionStorage.removeItem("activeCallId");
+    if (call) {
+      socket.emit("user-status-update", {
+        roomId,
+        userId,
+        status: { isInCall: false }
+      });
+    }
     setCall(null);
     setClient(null);
     toast("Left call.");
@@ -296,15 +309,13 @@ const RoomPage = () => {
 
   const handlePageNameChange = (pageId, newName) => {
     const trimmedName = newName.trim();
-    
+
     if (trimmedName && trimmedName !== pages.find(p => p.id === pageId)?.name) {
-      // Optimistic update
       setPages((prevPages) =>
         prevPages.map((p) =>
           p.id === pageId ? { ...p, name: trimmedName } : p
         )
       );
-      // Emit update
       socket.emit("content-change", {
         roomId,
         pageId: pageId,
@@ -365,10 +376,24 @@ const RoomPage = () => {
     }
   };
 
+  const handleOwnerChangeRequest = (newOwnerId, newOwnerName) => {
+    if (ownerId !== userId) return;
+    confirmAction(
+      "Change Room Owner?",
+      `Are you sure you want to make ${newOwnerName} the room owner?`,
+      () => {
+        socket.emit("change-room-owner", {
+          roomId,
+          currentOwnerId: userId,
+          newOwnerId,
+        });
+      }
+    );
+  };
+
   const toggleChatPanel = () => {
     const panel = chatPanelRef.current;
     if (!panel) return;
-
     if (isChatOpen) {
       panel.collapse();
     } else {
@@ -379,10 +404,8 @@ const RoomPage = () => {
 
   return (
     <div className="h-screen bg-gray-900 flex flex-col relative">
-      {/* Header */}
       <div className="bg-gray-800 border-b border-gray-700 p-4">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
-          {/* Left Side: Room Info */}
           <div className="flex items-center space-x-4 mb-4 lg:mb-0">
             <div className="flex items-center space-x-2">
               <span className="text-sm text-gray-400">Room ID:</span>
@@ -403,13 +426,9 @@ const RoomPage = () => {
               </span>
             </div>
           </div>
-
-          {/* H1 TITLE */}
           <h1 className="text-2xl font-bold bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent mb-4 lg:mb-0">
             Merging Minds Room
           </h1>
-
-          {/* Right Side: Leave/End Button */}
           <div className="flex items-center space-x-3">
             {userId === ownerId ? (
               <button
@@ -432,9 +451,8 @@ const RoomPage = () => {
         </div>
       </div>
 
-      {/* 3-COLUMN MAIN LAYOUT */}
       <PanelGroup direction="horizontal" className="flex-1 flex overflow-hidden">
-        {/* 1. Left Panel: Chat */}
+        {/* Left Panel: Chat */}
         <Panel
           ref={chatPanelRef}
           defaultSize={isChatOpen ? 20 : 0}
@@ -456,63 +474,72 @@ const RoomPage = () => {
 
         <PanelResizeHandle className="w-2 bg-gray-900 hover:bg-blue-600 transition-colors duration-200 cursor-col-resize" />
 
-        {/* 2. Middle Panel: Code Editor */}
-        <Panel defaultSize={55} minSize={30}>
-          <div className="flex-1 flex flex-col overflow-hidden h-full w-full bg-gray-900">
+        {/* Middle Panel: Code Editor */}
+        <Panel defaultSize={55} minSize={30} >
+          <div className="flex-1 flex flex-col  h-full w-full bg-gray-900 ">
             {/* Tabs */}
-            <div className="page-tabs flex items-center bg-gray-800 border-b border-gray-700 px-2 py-1 overflow-x-auto">
-              {pages.map((page) => (
-                <div
-                  key={page.id}
-                  className={`flex items-center px-3 py-1 rounded-t-md mr-2 ${
-                    page.id === activePageId
-                      ? "bg-gray-900 text-white border-t-2 border-blue-500"
-                      : "text-gray-400 hover:text-white hover:bg-gray-700"
-                  } ${editingPageId !== page.id ? "cursor-pointer" : "cursor-text"}`}
-                  onClick={() => setActivePageId(page.id)}
-                  onDoubleClick={() => startEditingPageName(page.id)}
-                >
-                  {editingPageId === page.id ? (
-                    <input
-                      type="text"
-                      defaultValue={page.name}
-                      autoFocus
-                      onFocus={(e) => e.target.select()}
-                      className="bg-gray-700 text-white text-sm p-0 border-none w-24 focus:ring-0 focus:border-none rounded px-1"
-                      onBlur={(e) => handlePageNameChange(page.id, e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') e.currentTarget.blur();
-                        if (e.key === 'Escape') setEditingPageId(null);
-                      }}
-                    />
-                  ) : (
-                    <span className="text-sm truncate max-w-[80px] select-none">{page.name}</span>
-                  )}
-                  
-                  {/* Hide close button while editing to avoid clicks */}
-                  {pages.length > 1 && editingPageId !== page.id && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        closePage(page.id);
-                      }}
-                      className="ml-2 text-gray-500 hover:text-red-500"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-              ))}
-              <button
-                onClick={addNewPage}
-                className="ml-2 bg-blue-600 text-white px-2 py-1 rounded-md flex items-center space-x-1 hover:bg-blue-500 hover:scale-105 transition-all"
+            <div className="py-2">
+              <div
+                className="
+                overflow-x-auto
+                whitespace-nowrap
+                page-tabs
+                flex items-center
+                bg-gray-800
+                border border-gray-700
+                px-2 py-1
+                rounded-xl
+                "
               >
-                <Plus className="w-4 h-4" />
-              </button>
+                {pages.map((page) => (
+                  <div
+                    key={page.id}
+                    className={`flex items-center px-3 py-1 rounded-lg mr-2 ${page.id === activePageId
+                      ? "bg-gray-900 text-white"
+                      : "text-gray-400 hover:text-white hover:bg-gray-700"
+                      } ${editingPageId !== page.id ? "cursor-pointer" : "cursor-text"}`}
+                    onClick={() => setActivePageId(page.id)}
+                    onDoubleClick={() => startEditingPageName(page.id)}
+                  >
+                    {editingPageId === page.id ? (
+                      <input
+                        type="text"
+                        defaultValue={page.name}
+                        autoFocus
+                        onFocus={(e) => e.target.select()}
+                        className="bg-gray-700 text-white text-sm p-0 border-none w-24 focus:ring-0 focus:border-none rounded px-1"
+                        onBlur={(e) => handlePageNameChange(page.id, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur();
+                          if (e.key === 'Escape') setEditingPageId(null);
+                        }}
+                      />
+                    ) : (
+                      <span className="text-sm truncate max-w-[80px] select-none">{page.name}</span>
+                    )}
+                    {pages.length > 1 && editingPageId !== page.id && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          closePage(page.id);
+                        }}
+                        className="ml-2 text-gray-500 hover:text-red-500"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={addNewPage}
+                  className="ml-2 bg-blue-600 text-white px-2 py-1 rounded-md flex items-center space-x-1 hover:bg-blue-500 hover:scale-105 transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
             </div>
-
             {/* Active Page */}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1  flex flex-col">
               {activePage ? (
                 <CodeEditor
                   key={activePage.id}
@@ -532,65 +559,74 @@ const RoomPage = () => {
           </div>
         </Panel>
 
-        {/* Draggable Handle */}
         <PanelResizeHandle className="w-2 bg-gray-900 hover:bg-blue-600 transition-colors duration-200 cursor-col-resize" />
 
-        {/* 3. Right Panel: Participants Toggle + Video */}
+        {/* Right Panel: Participants Toggle + Video */}
         <Panel defaultSize={25} minSize={20}>
-          <div className="w-full h-full bg-gray-800 flex flex-col overflow-hidden">
-            {/* Participants Toggle Button */}
-            <div className="relative p-4 border-b border-gray-700">
+          <div className="w-full h-full bg-gray-800 flex flex-col overflow-hidden ">
+            {/* Toggle Button */}
+            <div className="p-4 border-b border-gray-700 shrink-0">
               <button
-                onClick={() => setShowParticipants(!showParticipants)}
-                className="flex w-full items-center justify-center space-x-2 px-3 py-2 bg-gradient-to-r from-green-500 to-blue-500 
-                               hover:from-green-600 hover:to-blue-600 rounded-lg text-white font-bold transition-all hover:brightness-90"
+                onClick={() => setShowParticipants((p) => !p)}
+                className="flex w-full items-center justify-center space-x-2 px-3 py-2
+                           bg-gradient-to-r from-green-500 to-blue-500
+                           hover:from-green-600 hover:to-blue-600
+                           rounded-lg text-white font-bold transition-all"
               >
                 <Users className="w-4 h-4" />
-                <span>Participants ({participants.length})</span>
+                <span>
+                  {showParticipants
+                    ? `Video (${participants.length})`
+                    : `Participants (${participants.length})`}
+                </span>
               </button>
-              {/* The Popover Menu */}
-              {showParticipants && (
-                <div className="absolute top-16 left-0 right-0 mx-4 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50">
-                  <ParticipantsList
-                    participants={participants}
-                    client={client}
-                    call={call}
-                    ownerId={ownerId}
-                    currentUserId={userId}
-                    onRemoveParticipant={handleRemoveParticipant}
-                  />
-                </div>
-              )}
             </div>
 
-            {/* Video Panel (fills remaining space) */}
-            <div className="flex-1 overflow-hidden">
-              <VideoPanel
-                client={client}
-                call={call}
-                onStartCall={handleStartCall}
-                onLeaveCall={handleLeaveCall}
-                isJoiningCall={isJoiningCall}
-              />
+            {/* Content Switch */}
+            <div className="flex-1 overflow-hidden flex flex-col relative h-full">
+              {/* Participants List */}
+              <div className={`absolute inset-0 ${showParticipants ? 'block' : 'hidden'}`}>
+                <ParticipantsList
+                  participants={participants}
+                  client={client}
+                  call={call}
+                  ownerId={ownerId}
+                  currentUserId={userId}
+                  onRemoveParticipant={handleRemoveParticipant}
+                  onChangeOwner={handleOwnerChangeRequest}
+                />
+              </div>
+
+              {/* Video Panel */}
+              <div className={`absolute inset-0 ${!showParticipants ? 'block' : 'hidden'}`}>
+                <VideoPanel
+                  client={client}
+                  call={call}
+                  onStartCall={handleStartCall}
+                  onLeaveCall={handleLeaveCall}
+                  isJoiningCall={isJoiningCall}
+                  windows={3}
+                />
+              </div>
             </div>
           </div>
         </Panel>
       </PanelGroup>
 
+      {/* Floating Chat Button */}
       <button
         onClick={toggleChatPanel}
         className="absolute bottom-6 right-6 p-3 bg-gradient-to-r from-teal-500 via-cyan-200 to-emerald-200 hover:bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 text-white rounded-full shadow-lg transition-transform transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 z-50"
         title={isChatOpen ? "Hide Chat" : "Show Chat"}
       >
         <MessageSquare className="w-6 h-6" />
-
         {!isChatOpen && unreadCount > 0 && (
           <span className="absolute -top-1 -right-1 flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-red-500 rounded-full ring-2 ring-gray-900 animate-bounce shadow-sm">
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}
       </button>
-      
+
       <ConfirmationDialog
         open={confirmation.open}
         title={confirmation.title}
