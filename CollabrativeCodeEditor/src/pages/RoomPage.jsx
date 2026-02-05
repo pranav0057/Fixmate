@@ -623,7 +623,7 @@ const RoomPage = () => {
       {/* Floating Chat Button */}
       <button
         onClick={toggleChatPanel}
-        className="absolute bottom-3 right-4 p-3 bg-gradient-to-r from-teal-500 via-cyan-200 to-emerald-200 hover:bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 text-white rounded-full shadow-lg transition-transform transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 z-50"
+        className="absolute bottom-3 right-5.5 p-3 bg-gradient-to-r from-teal-500 via-cyan-200 to-emerald-200 hover:bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 text-white rounded-full shadow-lg transition-transform transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 z-50"
         title={isChatOpen ? "Hide Chat" : "Show Chat"}
       >
         <MessageSquare className="w-6 h-6" />
