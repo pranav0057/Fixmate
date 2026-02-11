@@ -41,7 +41,7 @@ const PaginatedVerticalLayout = ({ windows }) => {
           currentParticipants.map((participant) => (
             <div
               key={participant.sessionId}
-              className="w-full  bg-gray-800 h-42.5 rounded- overflow-hidden shadow-lg"
+              className="w-full  bg-gray-800 h-39.5 rounded- overflow-hidden shadow-lg"
             >
               <ParticipantView participant={participant} />
             </div>

@@ -21,6 +21,10 @@ import { socket } from "../socket";
 import { getUserId } from "../utils/userId";
 import { initStreamClient } from "../utils/streamClient.js";
 import ConfirmationDialog from "../components/Confirmation.jsx";
+import PagePermissionsModal from "../components/PagePermissionsModal/PagePermissionsModal.jsx";
+import RoomSettingsDrawer from "../components/RoomSettingsDrawer";
+
+
 import {
   Panel,
   PanelGroup,
@@ -46,6 +50,11 @@ const RoomPage = () => {
     onConfirm: null,
   });
   const [editingPageId, setEditingPageId] = useState(null);
+  const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
+  const [roomSettings, setRoomSettings] = useState({
+    pageCreation: "anyone",
+    defaultEdit: "everyone",
+  });
   const confirmAction = (title, message, onConfirm) => {
     setConfirmation({ open: true, title, message, onConfirm });
   };
@@ -63,6 +72,9 @@ const RoomPage = () => {
   const [isChatOpen, setIsChatOpen] = useState(true);
   const chatPanelRef = useRef(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [pagePermissionsOpen, setPagePermissionsOpen] = useState(false);
+  const [pagePermissionsFor, setPagePermissionsFor] = useState(null);
+
 
   const onBackButtonEvent = useCallback((e) => {
     e.preventDefault();
@@ -429,6 +441,15 @@ const RoomPage = () => {
           <h1 className="text-2xl font-bold bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent mb-4 lg:mb-0">
             Merging Minds Room
           </h1>
+          {userId === ownerId && (
+            <button
+              onClick={() => setRoomSettingsOpen(true)}
+              className="px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-sm"
+            >
+              ⚙️ Room Settings
+            </button>
+          )}
+
           <div className="flex items-center space-x-3">
             {userId === ownerId ? (
               <button
@@ -494,7 +515,7 @@ const RoomPage = () => {
                 {pages.map((page) => (
                   <div
                     key={page.id}
-                    className={`flex items-center px-3 py-1 rounded-lg mr-2 ${page.id === activePageId
+                    className={`group flex items-center px-3 py-1 rounded-lg mr-2 ${page.id === activePageId
                       ? "bg-gray-900 text-white"
                       : "text-gray-400 hover:text-white hover:bg-gray-700"
                       } ${editingPageId !== page.id ? "cursor-pointer" : "cursor-text"}`}
@@ -515,7 +536,30 @@ const RoomPage = () => {
                         }}
                       />
                     ) : (
-                      <span className="text-sm truncate max-w-[80px] select-none">{page.name}</span>
+                      <>
+                        <span className="text-sm truncate max-w-[80px] select-none">
+                          {page.name}
+                        </span>
+
+                        {/* ⚙️ Page Permissions */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();     // 👈 prevents tab switch
+                            setPagePermissionsFor(page.id);
+                            setPagePermissionsOpen(true);
+                          }}
+                          className="
+        ml-1
+        opacity-0 group-hover:opacity-100
+        text-gray-500 hover:text-white
+        transition-opacity
+      "
+                          title="Page permissions"
+                        >
+                          ⚙️
+                        </button>
+                      </>
+
                     )}
                     {pages.length > 1 && editingPageId !== page.id && (
                       <button
@@ -565,9 +609,9 @@ const RoomPage = () => {
         <Panel defaultSize={25} minSize={20}>
           <div className="w-full h-full bg-gray-900 flex flex-col overflow-hidden  ">
             {/* Toggle Button */}
-              <button
-                onClick={() => setShowParticipants((p) => !p)}
-                className="m-2
+            <button
+              onClick={() => setShowParticipants((p) => !p)}
+              className="m-2
               shrink-0
               flex w-[calc(100%-1rem)] items-center justify-center gap-2
               px-6 py-3
@@ -579,20 +623,20 @@ const RoomPage = () => {
               backdrop-blur
               shadow-md
               transition-all"
-              >
-                <Users className="w-4 h-4" />
-                <span>
-                  {showParticipants
-                    ? `Video (${participants.length})`
-                    : `Participants (${participants.length})`}
-                </span>
-              </button>
+            >
+              <Users className="w-4 h-4" />
+              <span>
+                {showParticipants
+                  ? `Video (${participants.length})`
+                  : `Participants (${participants.length})`}
+              </span>
+            </button>
 
             {/* Content Switch */}
             <div className="flex-1 overflow-hidden flex flex-col relative h-full">
               {/* Participants List */}
               <div className={`absolute inset-0 ${showParticipants ? 'block' : 'hidden'}`}>
-                
+
                 <ParticipantsList
                   participants={participants}
                   client={client}
@@ -646,6 +690,20 @@ const RoomPage = () => {
           setConfirmation((prev) => ({ ...prev, open: false }))
         }
       />
+      <RoomSettingsDrawer
+        isOpen={roomSettingsOpen}
+        onClose={() => setRoomSettingsOpen(false)}
+        settings={roomSettings}
+        setSettings={setRoomSettings}
+      />
+      <PagePermissionsModal
+        open={pagePermissionsOpen}
+        onClose={() => setPagePermissionsOpen(false)}
+        participants={participants}
+        pageId={pagePermissionsFor}
+      />
+
+
     </div>
   );
 };
