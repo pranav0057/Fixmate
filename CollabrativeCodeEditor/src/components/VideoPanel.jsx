@@ -80,30 +80,22 @@ return (
     <StreamVideo client={client}>
       <StreamTheme>
         <StreamCall call={call}>
-          {/* Added overflow-hidden to prevent controls from clipping out */}
-          <div className="h-full flex flex-col bg-gray-900 rounded-lg overflow-hidden">
-           
-            <div className="h-full flex flex-col bg-gray-900 rounded-lg overflow-hidden">
-
-  {/* VIDEO / WINDOW */}
- 
-  {/* CALL CONTROLS */}
-  <div className="flex justify-center py-1 bg-gray-900">
-    <CallControls
-      onLeave={() => {
-        console.log("User left the call");
-        sessionStorage.removeItem("activeCallId");
-        onLeaveCall?.();
-      }}
-    />
-  </div>
-   <div className="flex-1 min-h-0 relative">
-    <PaginatedVerticalLayout windows={windows} />
-  </div>
-
-
-</div>
-
+          <div className="h-full flex flex-col bg-gray-900 rounded-lg">
+            
+            {/* Call controls */}
+            <div className="flex justify-center py-2 border-t border-gray-700">
+              <CallControls
+                onLeave={() => {
+                  console.log(" User left the call");
+                  sessionStorage.removeItem("activeCallId");
+                  onLeaveCall?.();
+                }}
+              />
+            </div>
+            {/* Paginated layout */}
+            <div className="flex-1 min-h-0">
+              <PaginatedVerticalLayout />
+            </div>
           </div>
         </StreamCall>
       </StreamTheme>

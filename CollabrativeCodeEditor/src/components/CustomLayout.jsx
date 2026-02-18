@@ -4,13 +4,12 @@ import {
   ParticipantView,
 } from "@stream-io/video-react-sdk";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-
-const PaginatedVerticalLayout = ({ windows }) => {
+const PaginatedVerticalLayout = () => {
   const { useParticipants } = useCallStateHooks();
   const participants = useParticipants();
   const [currentPage, setCurrentPage] = useState(0);
-
-  const participantsPerPage = windows;
+  
+  const participantsPerPage = 3;
   const totalPages = Math.ceil(participants.length / participantsPerPage);
 
   const startIndex = currentPage * participantsPerPage;
@@ -30,9 +29,9 @@ const PaginatedVerticalLayout = ({ windows }) => {
   };
 
   return (
-    <div className="relative h-full w-full flex flex-col bg-gray-900">
+    <div className="relative h-full  w-full flex flex-col bg-gray-900">
       {/* Video Grid */}
-      <div className="flex-1 flex flex-col gap-3 p-3 items-center overflow-hidden">
+      <div className="flex-1 flex flex-col gap-2.5 p-2.5 overflow-hidden h-[100%]">
         {currentParticipants.length === 0 ? (
           <div className="text-gray-400">
             <p>Waiting for participants...</p>
@@ -41,7 +40,8 @@ const PaginatedVerticalLayout = ({ windows }) => {
           currentParticipants.map((participant) => (
             <div
               key={participant.sessionId}
-              className="w-full  bg-gray-800 h-39.5 rounded- overflow-hidden shadow-lg"
+               className="w-full  bg-gray-800 h-39.5 rounded-lg overflow-hidden shadow-lg"
+
             >
               <ParticipantView participant={participant} />
             </div>
@@ -55,7 +55,7 @@ const PaginatedVerticalLayout = ({ windows }) => {
       {totalPages > 1 && (
         <div
           className="
-      mx-4 mb-4
+      mx-4 
       flex items-center justify-center gap-4
       px-6 py-3
       rounded-3xl

@@ -1,6 +1,78 @@
 import { Server } from "socket.io";
 import { v4 as uuidV4 } from "uuid";
 
+const DEFAULT_ROOM_SETTINGS = Object.freeze({
+  pageCreation: "anyone",
+  defaultEdit: "everyone",
+});
+
+const VALID_PAGE_CREATION = new Set(["anyone", "owner"]);
+const VALID_DEFAULT_EDIT = new Set(["everyone", "creator"]);
+const VALID_PERMISSION_MODES = new Set(["everyone", "selected", "readonly"]);
+
+const sanitizeRoomSettings = (settings = {}) => ({
+  pageCreation: VALID_PAGE_CREATION.has(settings.pageCreation)
+    ? settings.pageCreation
+    : DEFAULT_ROOM_SETTINGS.pageCreation,
+  defaultEdit: VALID_DEFAULT_EDIT.has(settings.defaultEdit)
+    ? settings.defaultEdit
+    : DEFAULT_ROOM_SETTINGS.defaultEdit,
+});
+
+const sanitizePagePermissions = (permissions = {}, fallbackMode = "everyone") => {
+  const modeCandidate = permissions?.mode;
+  const mode = VALID_PERMISSION_MODES.has(modeCandidate)
+    ? modeCandidate
+    : VALID_PERMISSION_MODES.has(fallbackMode)
+      ? fallbackMode
+      : "everyone";
+
+  const editors = Array.isArray(permissions?.editors)
+    ? [...new Set(permissions.editors.filter((id) => typeof id === "string" && id.trim().length > 0))]
+    : [];
+
+  return {
+    mode,
+    editors: mode === "selected" ? editors : [],
+  };
+};
+
+const defaultPermissionsForNewPage = (roomSetting, creatorId) => {
+  if (roomSetting.defaultEdit === "creator") {
+    return {
+      mode: "selected",
+      editors: [],
+    };
+  }
+
+  return {
+    mode: "everyone",
+    editors: [],
+  };
+};
+
+const createNewPage = (name = "Page 1", creatorId = null, roomSetting = DEFAULT_ROOM_SETTINGS) => ({
+  id: uuidV4(),
+  name,
+  language: "javascript",
+  code: "",
+  stdin: "",
+  output: "",
+  createdBy: creatorId,
+  permissions: defaultPermissionsForNewPage(roomSetting, creatorId),
+});
+
+const normalizePage = (page, ownerId) => ({
+  id: page?.id || uuidV4(),
+  name: typeof page?.name === "string" && page.name.trim().length > 0 ? page.name : "Untitled",
+  language: page?.language || "javascript",
+  code: page?.code ?? "",
+  stdin: page?.stdin ?? "",
+  output: page?.output ?? "",
+  createdBy: page?.createdBy || ownerId || null,
+  permissions: sanitizePagePermissions(page?.permissions, "everyone"),
+});
+
 export const initSocket = (server) => {
   const io = new Server(server, {
     cors: {
@@ -14,22 +86,43 @@ export const initSocket = (server) => {
   const roomParticipants = new Map();
   const roomOwners = new Map();
   const roomPages = new Map();
+  const roomSettings = new Map();
+  const roomPagePermissionBackups = new Map();
   const DISCONNECT_GRACE_MS = 7000;
 
-  /* ---------------- PAGE FACTORY ---------------- */
-  const createNewPage = (name = "Page 1") => ({
-    id: uuidV4(),
-    name,
-    language: "javascript",
-    code: "",
-    stdin: "",
-    output: "",
-  });
+  const cleanupRoomState = (roomId) => {
+    roomParticipants.delete(roomId);
+    roomOwners.delete(roomId);
+    roomPages.delete(roomId);
+    roomSettings.delete(roomId);
+    roomPagePermissionBackups.delete(roomId);
+  };
 
-  // ✅ UPDATED: Include 'isInCall' in the user object
+  const clonePermissions = (permissions, fallbackMode = "selected") =>
+    sanitizePagePermissions(
+      {
+        mode: permissions?.mode,
+        editors: Array.isArray(permissions?.editors) ? [...permissions.editors] : [],
+      },
+      fallbackMode
+    );
+
+  const parsePreservedPermissions = (preservedPermissions) => {
+    if (!preservedPermissions || typeof preservedPermissions !== "object") {
+      return new Map();
+    }
+
+    return new Map(
+      Object.entries(preservedPermissions)
+        .filter(([pageId]) => typeof pageId === "string" && pageId.trim().length > 0)
+        .map(([pageId, permissions]) => [pageId, clonePermissions(permissions, "selected")])
+    );
+  };
+
   const getRoomUsers = (roomId) => {
     const userIds = roomParticipants.get(roomId);
     if (!userIds) return [];
+
     return Array.from(userIds).map((uid) => {
       const u = userMap.get(uid);
       return u
@@ -37,7 +130,7 @@ export const initSocket = (server) => {
             userId: uid,
             name: u.name,
             isOnline: true,
-            isInCall: u.isInCall , // Return the status
+            isInCall: !!u.isInCall,
           }
         : {
             userId: uid,
@@ -48,77 +141,172 @@ export const initSocket = (server) => {
     });
   };
 
-  io.on("connection", (socket) => {
-    /* ---------------- JOIN ROOM ---------------- */
-    socket.on("join-room", ({ roomId, userName, userId }) => {
-      socket.join(roomId);
-      if (!userId) return;
+  const isRoomOwner = (roomId, userId) => roomOwners.get(roomId) === userId;
 
-      // ✅ UPDATED: Initialize with isInCall: false
+  const getOrInitRoomSettings = (roomId) => {
+    if (!roomSettings.has(roomId)) {
+      roomSettings.set(roomId, { ...DEFAULT_ROOM_SETTINGS });
+    }
+    return roomSettings.get(roomId);
+  };
+
+  const getOrInitRoomPages = (roomId, creatorId) => {
+    if (!roomPages.has(roomId)) {
+      const setting = getOrInitRoomSettings(roomId);
+      roomPages.set(roomId, [createNewPage("Page 1", creatorId, setting)]);
+    } else {
+      const ownerId = roomOwners.get(roomId);
+      roomPages.set(
+        roomId,
+        roomPages.get(roomId).map((p) => normalizePage(p, ownerId))
+      );
+    }
+
+    return roomPages.get(roomId);
+  };
+
+  const assignNextOwnerIfNeeded = (roomId, departedUserId) => {
+    const participants = roomParticipants.get(roomId);
+    if (!participants || participants.size === 0) {
+      cleanupRoomState(roomId);
+      return;
+    }
+
+    const currentOwner = roomOwners.get(roomId);
+    if (currentOwner && currentOwner !== departedUserId) return;
+
+    const nextOwnerId = participants.values().next().value;
+    if (!nextOwnerId) {
+      cleanupRoomState(roomId);
+      return;
+    }
+
+    roomOwners.set(roomId, nextOwnerId);
+    io.to(roomId).emit("room-owner-changed", { ownerId: nextOwnerId });
+  };
+
+  const removeUserFromRoom = (roomId, userId) => {
+    const participants = roomParticipants.get(roomId);
+    if (!participants) return;
+
+    participants.delete(userId);
+
+    if (participants.size === 0) {
+      cleanupRoomState(roomId);
+      return;
+    }
+
+    assignNextOwnerIfNeeded(roomId, userId);
+
+    const pages = roomPages.get(roomId) || [];
+    const currentOwnerId = roomOwners.get(roomId) || null;
+    let reassigned = false;
+
+    if (currentOwnerId) {
+      pages.forEach((page) => {
+        if (page.createdBy === userId) {
+          page.createdBy = currentOwnerId;
+          reassigned = true;
+        }
+      });
+    }
+
+    if (reassigned) {
+      io.to(roomId).emit("pages-update", pages);
+    }
+
+    io.to(roomId).emit("participants-update", getRoomUsers(roomId));
+  };
+
+  const canCreatePage = (roomId, userId) => {
+    const setting = getOrInitRoomSettings(roomId);
+    if (setting.pageCreation === "anyone") return true;
+    return isRoomOwner(roomId, userId);
+  };
+
+  const canManagePagePermissions = (roomId, page, userId) => {
+    if (!page) return false;
+    return isRoomOwner(roomId, userId) || page.createdBy === userId;
+  };
+
+  const canEditPage = (roomId, page, userId) => {
+    if (!page || !userId) return false;
+    if (isRoomOwner(roomId, userId)) return true;
+    if (page.createdBy === userId) return true;
+
+    const permissions = sanitizePagePermissions(page.permissions, "everyone");
+    if (permissions.mode === "readonly") return false;
+    if (permissions.mode === "selected") return permissions.editors.includes(userId);
+    return true;
+  };
+
+  io.on("connection", (socket) => {
+    socket.on("join-room", ({ roomId, userName, userId }) => {
+      if (!roomId || !userId) return;
+
+      const previousSession = userMap.get(userId);
+      if (previousSession && previousSession.roomId && previousSession.roomId !== roomId) {
+        removeUserFromRoom(previousSession.roomId, userId);
+      }
+
+      socket.join(roomId);
+
       userMap.set(userId, {
         socketId: socket.id,
         name: userName,
         roomId,
         lastSeen: Date.now(),
-        isInCall: false, 
+        isInCall: false,
       });
 
       if (!roomParticipants.has(roomId)) {
-        roomOwners.set(roomId, userId);
         roomParticipants.set(roomId, new Set());
-        socket.emit("get-room-owner", { ownerId: userId });
-      } else {
-        socket.emit("get-room-owner", { ownerId: roomOwners.get(roomId) });
       }
-
       roomParticipants.get(roomId).add(userId);
 
-      if (!roomPages.has(roomId)) {
-        roomPages.set(roomId, [createNewPage("Page 1")]);
+      if (!roomOwners.has(roomId)) {
+        roomOwners.set(roomId, userId);
       }
 
-      socket.emit("pages-update", roomPages.get(roomId));
+      if (roomOwners.get(roomId) === userId) {
+        socket.emit("room-owner-assigned", { isOwner: true });
+      }
 
-      const users = getRoomUsers(roomId);
-      io.to(roomId).emit("participants-update", users);
-      socket.emit("self-joined", { userId, roomId, users });
+      const ownerId = roomOwners.get(roomId);
+      const settings = getOrInitRoomSettings(roomId);
+      const pages = getOrInitRoomPages(roomId, userId);
+
+      socket.emit("get-room-owner", { ownerId });
+      socket.emit("room-settings-update", settings);
+      socket.emit("pages-update", pages);
+
+      io.to(roomId).emit("participants-update", getRoomUsers(roomId));
+      socket.emit("self-joined", { userId, roomId, users: getRoomUsers(roomId) });
       socket.to(roomId).emit("user-joined", { userName, userId });
     });
 
-    /* ---------------- NEW: STATUS UPDATE LISTENER ---------------- */
     socket.on("user-status-update", ({ roomId, userId, status }) => {
       const user = userMap.get(userId);
-      
-      console.log("Received update for call status", status);
-      if (user && user.roomId === roomId) {
-        // Update the specific property (isInCall)
-        if (status.hasOwnProperty("isInCall")) {
-          user.isInCall = status.isInCall;
-        }
-        console.log("Updated user status:", user);
-        console.log(getRoomUsers(roomId))
-        io.to(roomId).emit("participants-update", getRoomUsers(roomId));
-      }
-    });
+      if (!user || user.roomId !== roomId) return;
 
-    /* ---------------- LEAVE ROOM ---------------- */
-    socket.on("leave-room", ({ roomId, userId }, callback) => {
-      userMap.delete(userId); // Automatically clears inCall status
-
-      const set = roomParticipants.get(roomId);
-      if (set) {
-        set.delete(userId);
-        if (set.size === 0) roomParticipants.delete(roomId);
+      if (Object.prototype.hasOwnProperty.call(status || {}, "isInCall")) {
+        user.isInCall = status.isInCall;
       }
 
       io.to(roomId).emit("participants-update", getRoomUsers(roomId));
-      socket.leave(roomId);
+    });
 
+    socket.on("leave-room", ({ roomId, userId }, callback) => {
+      const user = userMap.get(userId);
+      if (user && user.roomId === roomId) {
+        userMap.delete(userId);
+      }
+
+      removeUserFromRoom(roomId, userId);
+      socket.leave(roomId);
       if (callback) callback({ status: "ok" });
     });
 
-    // ... (Keep Chat, Metadata Sync, Editor OT, Page Mgmt as is) ...
-    /* ---------------- CHAT ---------------- */
     socket.on("send-message", (msg, callback) => {
       const { roomId, userName, message, time, userId } = msg;
       socket.to(roomId).emit("receive-message", {
@@ -131,21 +319,165 @@ export const initSocket = (server) => {
       if (callback) callback({ status: "delivered" });
     });
 
-    /* ---------------- METADATA SYNC ---------------- */
-    socket.on("content-change", ({ roomId, pageId, userId, updates }) => {
+    socket.on("update-room-settings", ({ roomId, userId, settings, preservedPermissions }, callback) => {
+      if (!roomId || !userId) {
+        callback?.({ status: "error", message: "Invalid room settings request." });
+        return;
+      }
+
+      if (!isRoomOwner(roomId, userId)) {
+        callback?.({ status: "error", message: "Only the room owner can update room settings." });
+        return;
+      }
+
+      const currentSettings = getOrInitRoomSettings(roomId);
+      const nextSettings = sanitizeRoomSettings(settings);
+      roomSettings.set(roomId, nextSettings);
+
+      if (currentSettings.defaultEdit !== nextSettings.defaultEdit) {
+        const pages = roomPages.get(roomId) || [];
+        const ownerId = roomOwners.get(roomId) || null;
+
+        if (nextSettings.defaultEdit === "everyone") {
+          const snapshot = new Map();
+          pages.forEach((page) => {
+            snapshot.set(page.id, clonePermissions(page.permissions, "selected"));
+            page.permissions = sanitizePagePermissions(
+              {
+                mode: "everyone",
+                editors: [],
+              },
+              "everyone"
+            );
+          });
+          roomPagePermissionBackups.set(roomId, snapshot);
+        } else {
+          const existingBackup = roomPagePermissionBackups.get(roomId);
+          const fallbackBackup = parsePreservedPermissions(preservedPermissions);
+          const backup =
+            existingBackup && existingBackup.size > 0 ? existingBackup : fallbackBackup;
+
+          if (backup.size > 0 && (!existingBackup || existingBackup.size === 0)) {
+            roomPagePermissionBackups.set(roomId, backup);
+          }
+
+          pages.forEach((page) => {
+            const creatorId = page.createdBy || ownerId;
+            page.createdBy = creatorId || null;
+
+            const restoredPermissions = backup.get(page.id);
+            if (restoredPermissions) {
+              page.permissions = clonePermissions(restoredPermissions, "selected");
+              return;
+            }
+
+            page.permissions = sanitizePagePermissions(
+              {
+                mode: "selected",
+                editors: [],
+              },
+              "selected"
+            );
+          });
+        }
+
+        io.to(roomId).emit("pages-update", pages);
+      }
+
+      io.to(roomId).emit("room-settings-update", nextSettings);
+      callback?.({ status: "ok", settings: nextSettings });
+    });
+
+    socket.on("update-page-permissions", ({ roomId, pageId, userId, permissions }, callback) => {
+      const pages = roomPages.get(roomId);
+      if (!pages) {
+        callback?.({ status: "error", message: "Room not found." });
+        return;
+      }
+
+      const page = pages.find((p) => p.id === pageId);
+      if (!page) {
+        callback?.({ status: "error", message: "Page not found." });
+        return;
+      }
+
+      if (!canManagePagePermissions(roomId, page, userId)) {
+        callback?.({ status: "error", message: "You do not have permission to manage this page." });
+        return;
+      }
+
+      const sanitizedPermissions = sanitizePagePermissions(
+        permissions,
+        page.permissions?.mode || "everyone"
+      );
+      if (sanitizedPermissions.mode === "selected") {
+        const roomOwnerId = roomOwners.get(roomId);
+        const participantSet = roomParticipants.get(roomId) || new Set();
+        sanitizedPermissions.editors = sanitizedPermissions.editors.filter((id) =>
+          participantSet.has(id) && id !== roomOwnerId && id !== page.createdBy
+        );
+      }
+
+      page.permissions = sanitizedPermissions;
+
+      if (getOrInitRoomSettings(roomId).defaultEdit === "creator") {
+        const backup = roomPagePermissionBackups.get(roomId) || new Map();
+        backup.set(page.id, clonePermissions(page.permissions, "selected"));
+        roomPagePermissionBackups.set(roomId, backup);
+      }
+
+      io.to(roomId).emit("pages-update", pages);
+      callback?.({ status: "ok", permissions: page.permissions });
+    });
+
+    socket.on("content-change", ({ roomId, pageId, userId, updates }, callback) => {
       const pages = roomPages.get(roomId);
       if (!pages) return;
+
       const page = pages.find((p) => p.id === pageId);
-      if (page) Object.assign(page, updates);
+      if (!page) return;
+
+      if (!canEditPage(roomId, page, userId)) {
+        callback?.({ status: "error", message: "You do not have edit access for this page." });
+        return;
+      }
+
+      if (!updates || typeof updates !== "object") return;
+
+      const safeUpdates = { ...updates };
+      delete safeUpdates.permissions;
+      delete safeUpdates.createdBy;
+      delete safeUpdates.id;
+
+      if (Object.keys(safeUpdates).length === 0) return;
+
+      if (
+        Object.prototype.hasOwnProperty.call(safeUpdates, "name") &&
+        !canManagePagePermissions(roomId, page, userId)
+      ) {
+        callback?.({ status: "error", message: "Only the room owner or page creator can rename this page." });
+        return;
+      }
+
+      Object.assign(page, safeUpdates);
       socket.broadcast.to(roomId).emit("content-update", {
         pageId,
         userId,
-        updates,
+        updates: safeUpdates,
       });
+
+      callback?.({ status: "ok" });
     });
 
-    /* ---------------- EDITOR OT RELAY ---------------- */
     socket.on("editor-op", ({ roomId, pageId, userId, range, text }) => {
+      const pages = roomPages.get(roomId);
+      if (!pages) return;
+
+      const page = pages.find((p) => p.id === pageId);
+      if (!page) return;
+
+      if (!canEditPage(roomId, page, userId)) return;
+
       socket.broadcast.to(roomId).emit("editor-op", {
         roomId,
         pageId,
@@ -155,84 +487,124 @@ export const initSocket = (server) => {
       });
     });
 
-    /* ---------------- PAGE MGMT ---------------- */
-    socket.on("add-page", ({ roomId, name }) => {
+    socket.on("add-page", ({ roomId, name, userId }, callback) => {
       const pages = roomPages.get(roomId);
-      if (!pages) return;
-      pages.push(createNewPage(name));
+      if (!pages) {
+        callback?.({ status: "error", message: "Room not found." });
+        return;
+      }
+
+      if (!canCreatePage(roomId, userId)) {
+        callback?.({ status: "error", message: "Only the room owner can create pages right now." });
+        return;
+      }
+
+      const pageName = typeof name === "string" && name.trim().length > 0
+        ? name.trim().slice(0, 64)
+        : `Page ${pages.length + 1}`;
+
+      const nextPage = createNewPage(pageName, userId, getOrInitRoomSettings(roomId));
+      pages.push(nextPage);
+
+      if (getOrInitRoomSettings(roomId).defaultEdit === "creator") {
+        const backup = roomPagePermissionBackups.get(roomId) || new Map();
+        backup.set(nextPage.id, clonePermissions(nextPage.permissions, "selected"));
+        roomPagePermissionBackups.set(roomId, backup);
+      }
+
       io.to(roomId).emit("pages-update", pages);
+      callback?.({ status: "ok" });
     });
 
-    socket.on("close-page", ({ roomId, pageId }) => {
+    socket.on("close-page", ({ roomId, pageId, userId }, callback) => {
       const pages = roomPages.get(roomId);
-      if (!pages) return;
-      const newPages = pages.filter((p) => p.id !== pageId);
-      roomPages.set(roomId, newPages);
-      io.to(roomId).emit("pages-update", newPages);
+      if (!pages) {
+        callback?.({ status: "error", message: "Room not found." });
+        return;
+      }
+
+      if (pages.length <= 1) {
+        callback?.({ status: "error", message: "At least one page must remain in the room." });
+        return;
+      }
+
+      const pageIndex = pages.findIndex((p) => p.id === pageId);
+      if (pageIndex === -1) {
+        callback?.({ status: "error", message: "Page not found." });
+        return;
+      }
+
+      const page = pages[pageIndex];
+      const canClose = isRoomOwner(roomId, userId) || page.createdBy === userId;
+      if (!canClose) {
+        callback?.({ status: "error", message: "Only the room owner or page creator can close this page." });
+        return;
+      }
+
+      pages.splice(pageIndex, 1);
+      const backup = roomPagePermissionBackups.get(roomId);
+      if (backup) {
+        backup.delete(pageId);
+      }
+      io.to(roomId).emit("pages-update", pages);
+      callback?.({ status: "ok" });
     });
 
-    /* ---------------- CHANGE ROOM OWNER ---------------- */
     socket.on("change-room-owner", ({ roomId, currentOwnerId, newOwnerId }) => {
       if (!roomId || !currentOwnerId || !newOwnerId) return;
       if (roomOwners.get(roomId) !== currentOwnerId) return;
+
       const participants = roomParticipants.get(roomId);
       if (!participants || !participants.has(newOwnerId)) return;
+
       roomOwners.set(roomId, newOwnerId);
       io.to(roomId).emit("room-owner-changed", { ownerId: newOwnerId });
     });
 
-    /* ---------------- END ROOM ---------------- */
     socket.on("end-room", ({ roomId, userId }, callback) => {
       if (roomOwners.get(roomId) !== userId) return;
+
       io.to(roomId).emit("room-ended", { message: "The room has been ended." });
       if (callback) callback({ status: "ok" });
+
       setTimeout(() => {
         const users = roomParticipants.get(roomId);
-        if (users) users.forEach((uid) => userMap.delete(uid));
-        roomParticipants.delete(roomId);
-        roomOwners.delete(roomId);
-        roomPages.delete(roomId);
+        if (users) {
+          users.forEach((uid) => userMap.delete(uid));
+        }
+        cleanupRoomState(roomId);
       }, 2000);
     });
 
-    /* ---------------- KICK USER ---------------- */
     socket.on("remove-participant", ({ roomId, userId, userIdToKick }) => {
       if (roomOwners.get(roomId) !== userId) return;
+      if (!userIdToKick || userIdToKick === userId) return;
+
       const kickedUser = userMap.get(userIdToKick);
       if (!kickedUser || kickedUser.roomId !== roomId) return;
+
       io.to(kickedUser.socketId).emit("kicked", { message: "You were removed." });
       userMap.delete(userIdToKick);
-      roomParticipants.get(roomId)?.delete(userIdToKick);
-      io.to(roomId).emit("participants-update", getRoomUsers(roomId));
+      removeUserFromRoom(roomId, userIdToKick);
+
       const sock = io.sockets.sockets.get(kickedUser.socketId);
       sock?.leave(roomId);
       sock?.disconnect(true);
     });
 
-    /* ---------------- DISCONNECT ---------------- */
     socket.on("disconnect", () => {
-      const entry = [...userMap.entries()].find(
-        ([, v]) => v.socketId === socket.id
-      );
+      const entry = [...userMap.entries()].find(([, value]) => value.socketId === socket.id);
       if (!entry) return;
 
       const [userId, { roomId }] = entry;
-      const socketId = socket.id;
+      const disconnectedSocketId = socket.id;
 
       setTimeout(() => {
-        const u = userMap.get(userId);
-        if (!u || u.socketId !== socketId) return;
+        const user = userMap.get(userId);
+        if (!user || user.socketId !== disconnectedSocketId) return;
 
-        userMap.delete(userId); // Deletion implicitly handles isInCall -> false
-        const set = roomParticipants.get(roomId);
-        if (set) {
-          set.delete(userId);
-          if (set.size === 0) {
-            roomParticipants.delete(roomId);
-            roomPages.delete(roomId);
-          }
-        }
-        io.to(roomId).emit("participants-update", getRoomUsers(roomId));
+        userMap.delete(userId);
+        removeUserFromRoom(roomId, userId);
       }, DISCONNECT_GRACE_MS);
     });
   });

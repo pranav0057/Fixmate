@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Play } from "lucide-react";
 import { initVimMode } from "monaco-vim";
 
-const CodeEditor = ({ page, socket, roomId, userId }) => {
+const CodeEditor = ({ page, socket, roomId, userId, canEdit = true }) => {
   const {
     id: pageId,
     language: initialLanguage,
@@ -26,12 +26,20 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
   const monacoRef = useRef(null);
   const statusBarRef = useRef(null);
   const vimModeRef = useRef(null);
+  const canEditRef = useRef(canEdit);
 
   /** 🔒 Prevent echo loops */
   const isRemoteEditRef = useRef(false);
 
   /* ---------------- VIM MODE STATE ---------------- */
   const [isVimMode, setIsVimMode] = useState(false);
+
+  useEffect(() => {
+    canEditRef.current = canEdit;
+    if (editorRef.current) {
+      editorRef.current.updateOptions({ readOnly: !canEdit });
+    }
+  }, [canEdit]);
 
   /* ---------------- SOCKET: RECEIVE OPS ---------------- */
   useEffect(() => {
@@ -51,22 +59,26 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
       const editor = editorRef.current;
       const monaco = monacoRef.current;
       if (!editor || !monaco) return;
+      const model = editor.getModel();
+      if (!model) return;
 
       isRemoteEditRef.current = true;
-
-      editor.executeEdits("remote", [
-        {
-          range: new monaco.Range(
-            range.startLineNumber,
-            range.startColumn,
-            range.endLineNumber,
-            range.endColumn
-          ),
-          text,
-        },
-      ]);
-
-      isRemoteEditRef.current = false;
+      try {
+        model.applyEdits([
+          {
+            range: new monaco.Range(
+              range.startLineNumber,
+              range.startColumn,
+              range.endLineNumber,
+              range.endColumn
+            ),
+            text,
+            forceMoveMarkers: true,
+          },
+        ]);
+      } finally {
+        isRemoteEditRef.current = false;
+      }
     };
 
     const handleContentUpdate = ({ pageId: pId, userId: senderId, updates }) => {
@@ -83,6 +95,21 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
         setOutput(updates.output);
         if (updates.output && updates.output !== "Running...") {
           setShowOutputPanel(true);
+        }
+      }
+
+      if (updates.code !== undefined) {
+        const editor = editorRef.current;
+        if (!editor) return;
+
+        const currentCode = editor.getValue();
+        if (currentCode === updates.code) return;
+
+        isRemoteEditRef.current = true;
+        try {
+          editor.setValue(updates.code);
+        } finally {
+          isRemoteEditRef.current = false;
         }
       }
     };
@@ -103,6 +130,7 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
 
     // Set initial code from page data (or empty string)
     editor.setValue(initialCode || "");
+    editor.updateOptions({ readOnly: !canEditRef.current });
 
     // Initialize Vim mode if enabled
     if (isVimMode) {
@@ -112,6 +140,7 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
     // 🔥 Capture local edits as OPERATIONS
     editor.onDidChangeModelContent((event) => {
       if (isRemoteEditRef.current) return;
+      if (!canEditRef.current) return;
 
       event.changes.forEach((change) => {
         socket.emit("editor-op", {
@@ -161,6 +190,7 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
 
   /* ---------------- LANGUAGE CHANGE ---------------- */
   const handleLangChange = (e) => {
+    if (!canEdit) return;
     const newLang = e.target.value;
     setLanguage(newLang);
 
@@ -174,6 +204,7 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
 
   /* INPUT */
   const handleInputChange = (e) => {
+    if (!canEdit) return;
     const val = e.target.value;
     setStdin(val);
 
@@ -187,6 +218,7 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
 
   /* ---------------- RUN CODE ---------------- */
   const runCode = async () => {
+    if (!canEdit) return;
     setLoading(true);
     setShowOutputPanel(true);
     setOutput("Running...");
@@ -240,24 +272,33 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
   return (
     <div className="h-full bg-slate-900 text-white flex flex-col overflow-hidden">
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col gap-3 min-h-0">
+      <div className="flex-1 flex flex-col gap-3  min-h-0">
         
         {/* EDITOR PANEL (Takes remaining height) */}
         <div className="flex-1 flex flex-col bg-slate-800 rounded-xl shadow-xl overflow-hidden border border-slate-700/50">
           {/* Toolbar */}
           <div className="flex items-center justify-between bg-slate-800/80 backdrop-blur px-3 py-2 border-b border-slate-700/50 shrink-0">
-            <select
-                value={language}
-                onChange={handleLangChange}
-                className="bg-slate-900 text-white text-xs border border-slate-700 rounded-lg px-2.5 py-1 outline-none focus:border-cyan-500 transition"
-              >
-                <option value="python">Python</option>
-                <option value="javascript">JavaScript</option>
-                <option value="cpp">C++</option>
-                <option value="c">C</option>
-                <option value="java">Java</option>
-                <option value="go">Go</option>
-              </select>
+            <div className="flex items-center gap-2">
+              <select
+                  value={language}
+                  onChange={handleLangChange}
+                  disabled={!canEdit}
+                  className="bg-slate-900 text-white text-xs border border-slate-700 rounded-lg px-2.5 py-1 outline-none focus:border-cyan-500 transition disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="python">Python</option>
+                  <option value="javascript">JavaScript</option>
+                  <option value="cpp">C++</option>
+                  <option value="c">C</option>
+                  <option value="java">Java</option>
+                  <option value="go">Go</option>
+                </select>
+
+              {!canEdit && (
+                <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300">
+                  Read-Only
+                </span>
+              )}
+            </div>
 
             <div className="flex items-center gap-2">
               {/* Vim Mode Checkbox */}
@@ -274,9 +315,11 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
               {/* Run Button */}
               <button
                 onClick={runCode}
-                disabled={loading}
+                disabled={loading || !canEdit}
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wide shadow-lg transition-all active:scale-95 ${
-                  loading ? "bg-emerald-900/50 text-emerald-200" : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                  loading || !canEdit
+                    ? "bg-emerald-900/50 text-emerald-200 cursor-not-allowed"
+                    : "bg-emerald-600 hover:bg-emerald-500 text-white"
                 }`}
               >
                 {loading ? "Running..." : <><Play size={10} fill="currentColor"/> Run</>}
@@ -326,6 +369,7 @@ const CodeEditor = ({ page, socket, roomId, userId }) => {
             <textarea
               value={stdin}
               onChange={handleInputChange}
+              readOnly={!canEdit}
               className="flex-1 w-full p-2.5 bg-transparent text-slate-300 text-xs font-mono resize-none outline-none focus:bg-slate-800/50 transition custom-scrollbar"
               placeholder="Enter input for your code here..."
               style={{

@@ -3,6 +3,7 @@ import React, {
   useEffect,
   useCallback,
   useRef,
+  useMemo,
 } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import {
@@ -10,8 +11,11 @@ import {
   Users,
   Plus,
   X,
+  Lock,
   LogOut,
   MessageSquare,
+  Settings2,
+  SlidersHorizontal,
 } from "lucide-react";
 import ChatPanel from "../components/ChatPanel";
 import VideoPanel from "../components/VideoPanel";
@@ -32,6 +36,39 @@ import {
 } from "react-resizable-panels";
 import toast from "react-hot-toast";
 
+const DEFAULT_ROOM_SETTINGS = {
+  pageCreation: "anyone",
+  defaultEdit: "everyone",
+};
+
+const normalizeRoomSettings = (settings = {}) => ({
+  pageCreation: settings?.pageCreation === "owner" ? "owner" : "anyone",
+  defaultEdit: settings?.defaultEdit === "creator" ? "creator" : "everyone",
+});
+
+const normalizePagePermissions = (permissions = {}) => {
+  const mode = ["everyone", "selected", "readonly"].includes(permissions?.mode)
+    ? permissions.mode
+    : "everyone";
+
+  const editors = Array.isArray(permissions?.editors)
+    ? [...new Set(permissions.editors.filter(Boolean))]
+    : [];
+
+  return {
+    mode,
+    editors: mode === "selected" ? editors : [],
+  };
+};
+
+const normalizePage = (page = {}) => ({
+  ...page,
+  createdBy: page?.createdBy || null,
+  permissions: normalizePagePermissions(page?.permissions),
+});
+
+const getPermissionsStorageKey = (roomId) => `page_permissions_backup_${roomId}`;
+
 const RoomPage = () => {
   const { roomId } = useParams();
   const [searchParams] = useSearchParams();
@@ -49,12 +86,8 @@ const RoomPage = () => {
     message: "",
     onConfirm: null,
   });
-  const [editingPageId, setEditingPageId] = useState(null);
   const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
-  const [roomSettings, setRoomSettings] = useState({
-    pageCreation: "anyone",
-    defaultEdit: "everyone",
-  });
+  const [roomSettings, setRoomSettings] = useState(DEFAULT_ROOM_SETTINGS);
   const confirmAction = (title, message, onConfirm) => {
     setConfirmation({ open: true, title, message, onConfirm });
   };
@@ -63,7 +96,7 @@ const RoomPage = () => {
   );
   const [pages, setPages] = useState(() => {
     const saved = sessionStorage.getItem(`pages_${roomId}`);
-    return saved ? JSON.parse(saved) : [];
+    return saved ? JSON.parse(saved).map(normalizePage) : [];
   });
   const [activePageId, setActivePageId] = useState(
     () => sessionStorage.getItem(`activePageId_${roomId}`) || null
@@ -74,6 +107,129 @@ const RoomPage = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [pagePermissionsOpen, setPagePermissionsOpen] = useState(false);
   const [pagePermissionsFor, setPagePermissionsFor] = useState(null);
+  const [isSavingPagePermissions, setIsSavingPagePermissions] = useState(false);
+  const [creatorTooltip, setCreatorTooltip] = useState(null);
+  const isOwner = ownerId === userId;
+  const pageBeingConfigured = pages.find((p) => p.id === pagePermissionsFor) || null;
+  const creatorNameMap = useMemo(() => {
+    const map = new Map();
+    participants.forEach((participant) => {
+      if (participant?.userId) {
+        map.set(participant.userId, participant.name || "Unknown");
+      }
+    });
+
+    if (userId && !map.has(userId)) {
+      map.set(userId, userName || "You");
+    }
+
+    return map;
+  }, [participants, userId, userName]);
+
+  const getPageCreatorLabel = useCallback(
+    (page) => {
+      if (!page?.createdBy) return "Unknown";
+      if (page.createdBy === userId) return "You";
+      return creatorNameMap.get(page.createdBy) || "Unknown";
+    },
+    [creatorNameMap, userId]
+  );
+
+  const canManagePagePermissions = useCallback(
+    (page) => {
+      if (!page) return false;
+      return isOwner || page.createdBy === userId;
+    },
+    [isOwner, userId]
+  );
+
+  const canEditPage = useCallback(
+    (page) => {
+      if (!page) return false;
+      if (isOwner) return true;
+      if (page.createdBy === userId) return true;
+
+      const permissions = normalizePagePermissions(page.permissions);
+      if (permissions.mode === "readonly") return false;
+      if (permissions.mode === "selected") {
+        return permissions.editors.includes(userId);
+      }
+      return true;
+    },
+    [isOwner, userId]
+  );
+
+  const buildPagePermissionSnapshot = useCallback(
+    (targetPages = pages) =>
+      targetPages.reduce((acc, page) => {
+        acc[page.id] = normalizePagePermissions(page.permissions);
+        return acc;
+      }, {}),
+    [pages]
+  );
+
+  const readStoredPermissionSnapshot = useCallback(() => {
+    try {
+      const raw = sessionStorage.getItem(getPermissionsStorageKey(roomId));
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }, [roomId]);
+
+  const canCreatePage = roomSettings.pageCreation === "anyone" || isOwner;
+
+  const updateRoomSettings = useCallback(
+    (updater) => {
+      if (!isOwner) return;
+
+      const next = normalizeRoomSettings(
+        typeof updater === "function" ? updater(roomSettings) : updater
+      );
+
+      const isSwitchingToEveryone =
+        roomSettings.defaultEdit !== "everyone" && next.defaultEdit === "everyone";
+      const isSwitchingToPageOwnerMode =
+        roomSettings.defaultEdit !== "creator" && next.defaultEdit === "creator";
+
+      if (isSwitchingToEveryone) {
+        sessionStorage.setItem(
+          getPermissionsStorageKey(roomId),
+          JSON.stringify(buildPagePermissionSnapshot())
+        );
+      }
+
+      const preservedPermissions = isSwitchingToPageOwnerMode
+        ? readStoredPermissionSnapshot()
+        : undefined;
+
+      setRoomSettings(next);
+
+      socket.emit(
+        "update-room-settings",
+        { roomId, userId, settings: next, preservedPermissions },
+        (ack) => {
+          if (!ack || ack.status !== "ok") {
+            setRoomSettings(roomSettings);
+            toast.error(ack?.message || "Unable to update room settings.");
+            return;
+          }
+
+          setRoomSettings(normalizeRoomSettings(ack.settings));
+        }
+      );
+    },
+    [
+      isOwner,
+      roomId,
+      userId,
+      roomSettings,
+      buildPagePermissionSnapshot,
+      readStoredPermissionSnapshot,
+    ]
+  );
 
 
   const onBackButtonEvent = useCallback((e) => {
@@ -111,6 +267,14 @@ const RoomPage = () => {
   }, [pages, roomId]);
 
   useEffect(() => {
+    if (roomSettings.defaultEdit !== "creator") return;
+    sessionStorage.setItem(
+      getPermissionsStorageKey(roomId),
+      JSON.stringify(buildPagePermissionSnapshot())
+    );
+  }, [roomId, roomSettings.defaultEdit, buildPagePermissionSnapshot]);
+
+  useEffect(() => {
     if (activePageId) {
       sessionStorage.setItem(`activePageId_${roomId}`, activePageId);
     } else {
@@ -131,12 +295,15 @@ const RoomPage = () => {
     if (!socket || !roomId || !userId) return;
 
     const handlePagesUpdate = (allPages) => {
-      setPages(allPages);
+      const normalizedPages = Array.isArray(allPages)
+        ? allPages.map(normalizePage)
+        : [];
+      setPages(normalizedPages);
       setActivePageId((currentActive) => {
-        const stillExists = allPages.some((p) => p.id === currentActive);
-        if (!stillExists && allPages.length > 0) {
-          return allPages[0].id;
-        } else if (allPages.length === 0) {
+        const stillExists = normalizedPages.some((p) => p.id === currentActive);
+        if (!stillExists && normalizedPages.length > 0) {
+          return normalizedPages[0].id;
+        } else if (normalizedPages.length === 0) {
           return null;
         }
         return currentActive;
@@ -155,6 +322,10 @@ const RoomPage = () => {
     const handleParticipants = (list) => {
       console.log("Received participants update:", list);
       setParticipants(list);
+    };
+
+    const handleRoomSettingsUpdate = (settings) => {
+      setRoomSettings(normalizeRoomSettings(settings));
     };
 
     const handleOwnerChanged = ({ ownerId: newOwnerId }) => {
@@ -199,6 +370,7 @@ const RoomPage = () => {
       setOwnerId(ownerId);
     });
     socket.on("room-owner-changed", handleOwnerChanged);
+    socket.on("room-settings-update", handleRoomSettingsUpdate);
 
     socket.emit("join-room", { roomId, userName, userId });
 
@@ -212,6 +384,7 @@ const RoomPage = () => {
       socket.off("room-owner-assigned", handleOwner);
       socket.off("get-room-owner");
       socket.off("room-owner-changed", handleOwnerChanged);
+      socket.off("room-settings-update", handleRoomSettingsUpdate);
     };
   }, [roomId, userName, userId]); // ✅ No call/client dependencies!
 
@@ -303,41 +476,191 @@ const RoomPage = () => {
   };
 
   const addNewPage = () => {
-    socket.emit("add-page", { roomId, name: `Page ${pages.length + 1}` });
-    toast.success("New page added!");
+    if (!canCreatePage) {
+      toast.error("Only the room owner can create pages in this room.");
+      return;
+    }
+
+    socket.emit(
+      "add-page",
+      { roomId, userId, name: `Page ${pages.length + 1}` },
+      (ack) => {
+        if (!ack || ack.status !== "ok") {
+          toast.error(ack?.message || "Unable to create page.");
+          return;
+        }
+        toast.success("New page added!");
+      }
+    );
   };
 
   const closePage = useCallback(
     (pageId) => {
-      socket.emit("close-page", { roomId, pageId });
-      toast("Page closed.");
+      const targetPage = pages.find((p) => p.id === pageId);
+      if (!targetPage) return;
+
+      if (!canManagePagePermissions(targetPage)) {
+        toast.error("Only the room owner or page creator can close this page.");
+        return;
+      }
+
+      socket.emit("close-page", { roomId, pageId, userId }, (ack) => {
+        if (!ack || ack.status !== "ok") {
+          toast.error(ack?.message || "Unable to close page.");
+          return;
+        }
+        toast("Page closed.");
+      });
     },
-    [roomId]
+    [roomId, userId, pages, canManagePagePermissions]
   );
 
-  const startEditingPageName = (pageId) => {
-    setEditingPageId(pageId);
-  };
+  const showCreatorTooltip = useCallback((event, text) => {
+    if (!text) return;
+    const x = Math.min(event.clientX + 12, window.innerWidth - 220);
+    const y = Math.min(event.clientY + 14, window.innerHeight - 56);
+    setCreatorTooltip({
+      text,
+      x,
+      y,
+    });
+  }, []);
 
-  const handlePageNameChange = (pageId, newName) => {
-    const trimmedName = newName.trim();
+  const moveCreatorTooltip = useCallback((event) => {
+    const x = Math.min(event.clientX + 12, window.innerWidth - 220);
+    const y = Math.min(event.clientY + 14, window.innerHeight - 56);
+    setCreatorTooltip((prev) =>
+      prev
+        ? {
+            ...prev,
+            x,
+            y,
+          }
+        : prev
+    );
+  }, []);
 
-    if (trimmedName && trimmedName !== pages.find(p => p.id === pageId)?.name) {
-      setPages((prevPages) =>
-        prevPages.map((p) =>
-          p.id === pageId ? { ...p, name: trimmedName } : p
-        )
-      );
-      socket.emit("content-change", {
-        roomId,
-        pageId: pageId,
-        userId,
-        updates: { name: trimmedName },
-      });
-      toast.success(`Page renamed to "${trimmedName}"`);
-    }
-    setEditingPageId(null);
-  };
+  const hideCreatorTooltip = useCallback(() => {
+    setCreatorTooltip(null);
+  }, []);
+
+  const handleSavePagePermissions = useCallback(
+    async ({ name: nextNameRaw, permissions: nextPermissions }) => {
+      if (!pagePermissionsFor) return;
+
+      const targetPage = pages.find((p) => p.id === pagePermissionsFor);
+      if (!targetPage) return;
+
+      if (!canManagePagePermissions(targetPage)) {
+        toast.error("You don't have permission to manage this page.");
+        return;
+      }
+
+      const nextName = typeof nextNameRaw === "string" ? nextNameRaw.trim() : "";
+      const shouldRename = !!nextName && nextName !== targetPage.name;
+      const currentPermissions = normalizePagePermissions(targetPage.permissions);
+      const requestedPermissions = normalizePagePermissions(nextPermissions);
+      const canSavePermissions = roomSettings.defaultEdit === "creator";
+      const currentEditorsKey = currentPermissions.editors.join("|");
+      const requestedEditorsKey = requestedPermissions.editors.join("|");
+      const shouldSavePermissions =
+        canSavePermissions &&
+        (currentPermissions.mode !== requestedPermissions.mode ||
+          currentEditorsKey !== requestedEditorsKey);
+
+      if (!shouldRename && !shouldSavePermissions) {
+        setPagePermissionsOpen(false);
+        return;
+      }
+
+      const emitWithAck = (event, payload) =>
+        new Promise((resolve) => {
+          socket.emit(event, payload, (ack) => resolve(ack));
+        });
+
+      setIsSavingPagePermissions(true);
+      let didChange = false;
+
+      if (shouldRename) {
+        setPages((prevPages) =>
+          prevPages.map((p) =>
+            p.id === pagePermissionsFor ? { ...p, name: nextName } : p
+          )
+        );
+
+        const renameAck = await emitWithAck("content-change", {
+          roomId,
+          pageId: pagePermissionsFor,
+          userId,
+          updates: { name: nextName },
+        });
+
+        if (!renameAck || renameAck.status !== "ok") {
+          setPages((prevPages) =>
+            prevPages.map((p) =>
+              p.id === pagePermissionsFor ? { ...p, name: targetPage.name } : p
+            )
+          );
+          setIsSavingPagePermissions(false);
+          toast.error(renameAck?.message || "Unable to rename page.");
+          return;
+        }
+
+        didChange = true;
+      }
+
+      if (shouldSavePermissions) {
+        const permissionAck = await emitWithAck("update-page-permissions", {
+          roomId,
+          pageId: pagePermissionsFor,
+          userId,
+          permissions: requestedPermissions,
+        });
+
+        if (!permissionAck || permissionAck.status !== "ok") {
+          setIsSavingPagePermissions(false);
+          toast.error(permissionAck?.message || "Unable to update page permissions.");
+          return;
+        }
+
+        didChange = true;
+      }
+
+      setIsSavingPagePermissions(false);
+
+      if (didChange) {
+        toast.success("Page settings updated.");
+      }
+      setPagePermissionsOpen(false);
+    },
+    [
+      pagePermissionsFor,
+      pages,
+      canManagePagePermissions,
+      roomId,
+      userId,
+      roomSettings.defaultEdit,
+    ]
+  );
+
+  const openPageSettings = useCallback(
+    (pageId) => {
+      const targetPage = pages.find((p) => p.id === pageId);
+      if (!targetPage) return;
+
+      if (!canManagePagePermissions(targetPage)) {
+        toast.error("You don't have permission to manage this page.");
+        return;
+      }
+
+      setPagePermissionsFor(pageId);
+      setPagePermissionsOpen(true);
+    },
+    [
+      pages,
+      canManagePagePermissions,
+    ]
+  );
 
   const copyRoomId = () => {
     if (roomId) {
@@ -414,6 +737,8 @@ const RoomPage = () => {
     }
   };
 
+  const activePageCanEdit = canEditPage(activePage);
+
   return (
     <div className="h-screen bg-gray-900 flex flex-col relative">
       <div className="bg-gray-800 border-b border-gray-700 p-4">
@@ -441,17 +766,28 @@ const RoomPage = () => {
           <h1 className="text-2xl font-bold bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent mb-4 lg:mb-0">
             Merging Minds Room
           </h1>
-          {userId === ownerId && (
+          {isOwner && (
             <button
               onClick={() => setRoomSettingsOpen(true)}
-              className="px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-sm"
+              className="
+                inline-flex items-center gap-2
+                px-3.5 py-2
+                rounded-lg
+                border border-slate-600
+                bg-slate-800/90
+                text-sm font-medium text-slate-100
+                hover:border-cyan-500/50 hover:bg-slate-700/90
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60
+                transition-all
+              "
             >
-              ⚙️ Room Settings
+              <Settings2 className="w-4 h-4 text-cyan-300" />
+              <span>Room Settings</span>
             </button>
           )}
 
           <div className="flex items-center space-x-3">
-            {userId === ownerId ? (
+            {isOwner ? (
               <button
                 onClick={handleEndRoom}
                 className="flex items-center justify-center space-x-2 px-4 py-2 bg-red-700 hover:bg-red-600 rounded-lg text-sm text-white"
@@ -512,71 +848,88 @@ const RoomPage = () => {
                 rounded-xl
                 "
               >
-                {pages.map((page) => (
-                  <div
-                    key={page.id}
-                    className={`group flex items-center px-3 py-1 rounded-lg mr-2 ${page.id === activePageId
-                      ? "bg-gray-900 text-white"
-                      : "text-gray-400 hover:text-white hover:bg-gray-700"
-                      } ${editingPageId !== page.id ? "cursor-pointer" : "cursor-text"}`}
-                    onClick={() => setActivePageId(page.id)}
-                    onDoubleClick={() => startEditingPageName(page.id)}
-                  >
-                    {editingPageId === page.id ? (
-                      <input
-                        type="text"
-                        defaultValue={page.name}
-                        autoFocus
-                        onFocus={(e) => e.target.select()}
-                        className="bg-gray-700 text-white text-sm p-0 border-none w-24 focus:ring-0 focus:border-none rounded px-1"
-                        onBlur={(e) => handlePageNameChange(page.id, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') e.currentTarget.blur();
-                          if (e.key === 'Escape') setEditingPageId(null);
-                        }}
-                      />
-                    ) : (
-                      <>
-                        <span className="text-sm truncate max-w-[80px] select-none">
-                          {page.name}
-                        </span>
+                {pages.map((page) => {
+                  const pageCanEdit = canEditPage(page);
+                  const pageCanManage = canManagePagePermissions(page);
+                  const pageCreatedByMe = page.createdBy === userId;
+                  const creatorLabel = getPageCreatorLabel(page);
+                  const creatorTooltipText =
+                    page.createdBy && page.createdBy !== userId
+                      ? `Created by ${creatorLabel}`
+                      : null;
+                  const pageToneClass =
+                    page.id === activePageId
+                      ? pageCreatedByMe
+                        ? "bg-cyan-900/35 text-cyan-100 border border-cyan-500/40"
+                        : "bg-gray-900 text-white"
+                      : pageCreatedByMe
+                        ? "text-cyan-200 bg-cyan-900/20 border border-cyan-700/40 hover:bg-cyan-800/30 hover:text-cyan-100"
+                        : "text-gray-400 hover:text-white hover:bg-gray-700";
 
-                        {/* ⚙️ Page Permissions */}
+                  return (
+                    <div
+                      key={page.id}
+                      className={`group flex items-center px-3 py-1 rounded-lg mr-2 cursor-pointer ${pageToneClass}`}
+                      onClick={() => setActivePageId(page.id)}
+                      onMouseEnter={(event) =>
+                        creatorTooltipText && showCreatorTooltip(event, creatorTooltipText)
+                      }
+                      onMouseMove={(event) => creatorTooltipText && moveCreatorTooltip(event)}
+                      onMouseLeave={hideCreatorTooltip}
+                    >
+                      <span className="text-sm truncate max-w-[130px] select-none">
+                        {page.name}
+                      </span>
+
+                      {!pageCanEdit && (
+                        <Lock className="ml-1 h-3 w-3 text-slate-500" />
+                      )}
+
+                      {pageCanManage && (
                         <button
                           onClick={(e) => {
-                            e.stopPropagation();     // 👈 prevents tab switch
-                            setPagePermissionsFor(page.id);
-                            setPagePermissionsOpen(true);
+                            e.stopPropagation();
+                            openPageSettings(page.id);
                           }}
                           className="
-        ml-1
-        opacity-0 group-hover:opacity-100
-        text-gray-500 hover:text-white
-        transition-opacity
-      "
-                          title="Page permissions"
+                            ml-1
+                            inline-flex items-center justify-center
+                            w-7 h-7 rounded-md
+                            opacity-0 group-hover:opacity-100 focus:opacity-100
+                            text-slate-500 hover:text-slate-100
+                            hover:bg-slate-700/70
+                            focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60
+                            transition-all
+                          "
+                          title="Page settings"
+                          aria-label="Page settings"
                         >
-                          ⚙️
+                          <SlidersHorizontal className="w-3.5 h-3.5" />
                         </button>
-                      </>
+                      )}
 
-                    )}
-                    {pages.length > 1 && editingPageId !== page.id && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          closePage(page.id);
-                        }}
-                        className="ml-2 text-gray-500 hover:text-red-500"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                      {pages.length > 1 && pageCanManage && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            closePage(page.id);
+                          }}
+                          className="ml-2 text-gray-500 hover:text-red-500"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
                 <button
                   onClick={addNewPage}
-                  className="ml-2 bg-blue-600 text-white px-2 py-1 rounded-md flex items-center space-x-1 hover:bg-blue-500 hover:scale-105 transition-all"
+                  disabled={!canCreatePage}
+                  className={`ml-2 px-2 py-1 rounded-md flex items-center space-x-1 transition-all ${
+                    canCreatePage
+                      ? "bg-blue-600 text-white hover:bg-blue-500 hover:scale-105"
+                      : "bg-slate-700 text-slate-400 cursor-not-allowed"
+                  }`}
                 >
                   <Plus className="w-4 h-4" />
                 </button>
@@ -591,6 +944,7 @@ const RoomPage = () => {
                   socket={socket}
                   roomId={roomId}
                   userId={userId}
+                  canEdit={activePageCanEdit}
                 />
               ) : (
                 <div className="flex items-center justify-center h-full text-gray-500">
@@ -667,7 +1021,7 @@ const RoomPage = () => {
       {/* Floating Chat Button */}
       <button
         onClick={toggleChatPanel}
-        className="absolute bottom-3 right-5.5 p-3 bg-gradient-to-r from-teal-500 via-cyan-200 to-emerald-200 hover:bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 text-white rounded-full shadow-lg transition-transform transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 z-50"
+        className="absolute bottom-3.5 right-5.5 p-3 bg-gradient-to-r from-teal-500 via-cyan-200 to-emerald-200 hover:bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 text-white rounded-full shadow-lg transition-transform transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-opacity-75 z-50"
         title={isChatOpen ? "Hide Chat" : "Show Chat"}
       >
         <MessageSquare className="w-6 h-6" />
@@ -677,6 +1031,21 @@ const RoomPage = () => {
           </span>
         )}
       </button>
+
+      {creatorTooltip && (
+        <div
+          className="
+            pointer-events-none fixed z-[90]
+            rounded-lg border border-cyan-400/35 bg-slate-900/95
+            px-2.5 py-1.5
+            text-xs font-medium text-cyan-100
+            shadow-[0_8px_24px_-12px_rgba(34,211,238,0.7)]
+          "
+          style={{ left: creatorTooltip.x, top: creatorTooltip.y }}
+        >
+          {creatorTooltip.text}
+        </div>
+      )}
 
       <ConfirmationDialog
         open={confirmation.open}
@@ -694,13 +1063,27 @@ const RoomPage = () => {
         isOpen={roomSettingsOpen}
         onClose={() => setRoomSettingsOpen(false)}
         settings={roomSettings}
-        setSettings={setRoomSettings}
+        setSettings={updateRoomSettings}
       />
       <PagePermissionsModal
+        key={
+          pageBeingConfigured
+            ? `${pageBeingConfigured.id}:${pageBeingConfigured.name}:${pageBeingConfigured.permissions?.mode}:${(pageBeingConfigured.permissions?.editors || []).join("|")}`
+            : "page-settings-empty"
+        }
         open={pagePermissionsOpen}
         onClose={() => setPagePermissionsOpen(false)}
-        participants={participants}
         pageId={pagePermissionsFor}
+        pageName={pageBeingConfigured?.name || ""}
+        participants={participants}
+        ownerId={ownerId}
+        pageCreatorId={pageBeingConfigured?.createdBy || null}
+        pageCreatorName={getPageCreatorLabel(pageBeingConfigured)}
+        value={pageBeingConfigured?.permissions}
+        onSave={handleSavePagePermissions}
+        isSaving={isSavingPagePermissions}
+        permissionsLockedByRoom={roomSettings.defaultEdit === "everyone"}
+        canManage={canManagePagePermissions(pageBeingConfigured)}
       />
 
 

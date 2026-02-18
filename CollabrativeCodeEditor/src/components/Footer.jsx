@@ -116,7 +116,7 @@ const Footer = () => {
         <div className="mt-8 flex flex-col items-center text-center text-gray-400">
           <p className="flex items-center gap-2 text-sm">
             <MapPin className="w-4 h-4 text-red-400" />
-            123 Tech Park, Innovation Street, Bangalore, India
+            Thapar Institute of Engineering and Technology Patiala, Punjab, India
           </p>
         </div>
 
